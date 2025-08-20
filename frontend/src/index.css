@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom button styles */
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors duration-200;
+  }
+  
+  .btn-primary {
+    @apply bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-200 text-gray-900 hover:bg-gray-300 focus:ring-gray-500;
+  }
+  
+  .btn-outline {
+    @apply bg-transparent border-gray-300 text-gray-700 hover:bg-gray-50 focus:ring-gray-500;
+  }
+  
+  .btn-lg {
+    @apply px-6 py-3 text-base;
+  }
+  
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+  
+  .input {
+    @apply block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm;
+  }
+  
+  .select {
+    @apply block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm;
+  }
+}
+
+/* Loading spinner */
+.spinner {
+  border: 2px solid #f3f3f3;
+  border-top: 2px solid #3b82f6;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Drill-down table styles */
+.drill-down-table {
+  @apply w-full border-collapse;
+}
+
+.drill-down-table th {
+  @apply bg-gray-50 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200;
+}
+
+.drill-down-table td {
+  @apply px-4 py-3 text-sm text-gray-900 border-b border-gray-200;
+}
+
+.drill-down-table tbody tr:hover {
+  @apply bg-gray-50;
+}
+
+/* Expandable row styles */
+.expandable-row {
+  @apply cursor-pointer transition-colors duration-150;
+}
+
+.expandable-row:hover {
+  @apply bg-blue-50;
+}
+
+.dependency-level-1 {
+  @apply pl-4 border-l-2 border-blue-200;
+}
+
+.dependency-level-2 {
+  @apply pl-8 border-l-2 border-green-200;
+}
+
+.dependency-level-3 {
+  @apply pl-12 border-l-2 border-yellow-200;
+}
+
+.dependency-level-4 {
+  @apply pl-16 border-l-2 border-red-200;
+}
+
+.dependency-level-5 {
+  @apply pl-20 border-l-2 border-purple-200;
+}

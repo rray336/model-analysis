@@ -1,0 +1,13 @@
+{
+  "name": "financial-model-analyzer",
+  "version": "1.0.0",
+  "description": "Single file Excel financial model analyzer with drill-down capabilities",
+  "scripts": {
+    "build": "cd frontend && npm run build",
+    "dev": "cd frontend && npm run dev",
+    "install-frontend": "cd frontend && npm install"
+  },
+  "keywords": ["excel", "financial", "analysis", "drill-down"],
+  "author": "",
+  "license": "MIT"
+}
