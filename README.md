@@ -1,4 +1,4 @@
-# Financial Model Analyzer
+# Model Analysis
 
 A single file Excel financial model analyzer with progressive drill-down capabilities.
 
@@ -11,10 +11,14 @@ All core features have been implemented and tested. The application is ready for
 - **Single File Upload**: Upload any Excel (.xlsx, .xls) file
 - **Sheet Selection**: Choose from available sheets in your workbook
 - **Cell Analysis**: Analyze any cell by entering its address (A1, B5, AC123, etc.)
-- **Progressive Drill-down**: Click to expand formula dependencies level by level (drivers appear above formulas)
+- **Multi-Level Drill-down**: Click on ANY formula cell to drill down into its dependencies
+  - True nested hierarchical expansion
+  - Click on individual dependencies (like "Segments!BT57") to see their sub-dependencies
+  - Unlimited depth exploration of formula relationships
+  - Drivers appear above formulas (proper financial modeling flow)
 - **Formula Complexity**: Automatic complexity assessment (simple, moderate, complex)
 - **External Reference Detection**: Identifies and handles external file references (stops drill-down appropriately)
-- **Tabular Visualization**: Clean hierarchical view with proper financial modeling flow
+- **Interactive Tabular Visualization**: Clean hierarchical view with expandable/collapsible rows
 - **Graph Placeholder**: Tab interface ready for future graph visualization implementation
 
 ## Quick Start
@@ -101,19 +105,22 @@ cd frontend && npm run dev
    - Click "Analyze Cell" to get cell information
    - View value, formula, complexity, and drill-down capability
 
-5. **Progressive Drill-down**: 
+5. **Multi-Level Drill-down**: 
    - If cell has dependencies, drill-down table appears
-   - Click chevron icons to expand formula components
+   - Click chevron icons OR click on ANY formula cell to expand its dependencies
+   - **True nested expansion**: Each formula cell becomes clickable for further drill-down
    - **Drivers appear above the formulas that use them** (proper financial modeling flow)
-   - Navigate through multiple levels of dependencies
-   - View constants vs formulas at each level
+   - Navigate through unlimited levels of dependencies
+   - View hierarchical relationships with visual indentation
+   - Collapse/expand individual dependency branches
 
 ## API Endpoints
 
 - `POST /api/upload` - Upload Excel file
 - `GET /api/sheets/{session_id}` - Get available sheets
 - `GET /api/analyze/{session_id}/{sheet}/{cell}` - Analyze specific cell
-- `GET /api/drill-down/{session_id}/{sheet}/{cell}?depth=N` - Progressive drill-down
+- `GET /api/drill-down/{session_id}/{sheet}/{cell}?depth=N` - Initial drill-down analysis
+- `POST /api/expand-dependency/{session_id}/{sheet}/{cell}` - **NEW**: Expand individual dependencies for multi-level drill-down
 - `DELETE /api/sessions/{session_id}` - Clean up session
 - `GET /api/health` - Health check
 

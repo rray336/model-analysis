@@ -1,5 +1,5 @@
 import axios, { AxiosResponse } from 'axios';
-import { UploadResponse, CellInfo, DrillDownResponse } from '../types/api';
+import { UploadResponse, CellInfo, DrillDownResponse, DependencyInfo } from '../types/api';
 
 const API_BASE_URL = '/api';
 
@@ -44,6 +44,17 @@ export class ApiService {
   ): Promise<DrillDownResponse> {
     const response: AxiosResponse<DrillDownResponse> = await api.get(
       `/drill-down/${sessionId}/${encodeURIComponent(sheetName)}/${cellAddress}?depth=${depth}`
+    );
+    return response.data;
+  }
+  
+  static async expandDependency(
+    sessionId: string,
+    sheetName: string, 
+    cellAddress: string
+  ): Promise<{ dependencies: DependencyInfo[] }> {
+    const response: AxiosResponse<{ dependencies: DependencyInfo[] }> = await api.post(
+      `/expand-dependency/${sessionId}/${encodeURIComponent(sheetName)}/${cellAddress}`
     );
     return response.data;
   }

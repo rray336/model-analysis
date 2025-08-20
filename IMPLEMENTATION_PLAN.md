@@ -1,4 +1,4 @@
-# Financial Model Analyzer - Implementation Plan
+# Model Analysis - Implementation Plan
 
 ## Project Overview
 
@@ -13,8 +13,10 @@ All core functionality has been implemented and is fully operational. The applic
 1. **Upload**: User uploads a single Excel (.xlsx) file ✅
 2. **Select**: User selects a sheet from dropdown menu ✅
 3. **Input**: User enters cell address (e.g., "A1", "B5") ✅
-4. **Analyze**: App shows progressive drill-down analysis ✅
-   - **Tabular View**: Progressive drill-down with drivers appearing above formulas ✅
+4. **Analyze**: App shows multi-level drill-down analysis ✅
+   - **Tabular View**: True nested multi-level drill-down with drivers appearing above formulas ✅
+   - **Interactive Expansion**: Click on ANY formula cell to drill down further ✅
+   - **Hierarchical Structure**: Unlimited depth exploration with visual indentation ✅
    - **Graph View**: Placeholder ready for future implementation 🔄
 
 ## Architecture Decisions
@@ -25,11 +27,14 @@ All core functionality has been implemented and is fully operational. The applic
 - **Frontend Build**: `npm run build` → FastAPI serves from `/frontend/dist/`
 - **Benefits**: No CORS issues, single port, production-ready from start
 
-### Progressive Drill-Down Logic  
+### Multi-Level Drill-Down Logic ✅ ENHANCED
 - Start with user-selected cell
-- Expand one level at a time showing direct dependencies
-- Stop conditions: constants, external file references, or max depth
-- Each dependency clickable to drill deeper
+- **NEW**: True nested expansion - each formula cell becomes individually expandable
+- **NEW**: Click on any dependency to drill down into its sub-dependencies  
+- **NEW**: Hierarchical tree structure with unlimited depth
+- Stop conditions: constants, external file references, or user choice
+- Visual indentation shows dependency levels
+- Collapse/expand individual branches independently
 
 ### File Storage
 - Local uploads folder: `backend/uploads/{session_id}/`
@@ -88,13 +93,16 @@ All core implementation phases have been successfully completed:
 - Session-based file management with cleanup
 - External reference detection and handling
 
-### ✅ Phase 3: Frontend Development (COMPLETED)
+### ✅ Phase 3: Frontend Development (COMPLETED + ENHANCED)
 - React frontend build process with Vite + TypeScript
 - Single file upload component with drag & drop
 - Sheet selector + A1-format cell input with validation
-- Progressive tabular drill-down visualization (drivers above formulas)
+- **ENHANCED**: Multi-level nested drill-down visualization (drivers above formulas)
+- **NEW**: Click-to-expand functionality for individual dependencies
+- **NEW**: True hierarchical tree structure with visual indentation
+- **NEW**: Individual loading states for each dependency expansion
 - Graph visualization placeholder with tab interface
-- Error handling and loading states
+- Comprehensive error handling and loading states
 
 ### ✅ Phase 4: Testing & Integration (COMPLETED)
 - End-to-end functionality tested and working
@@ -143,7 +151,28 @@ Response: {
       value: number,
       formula: string,
       is_leaf: boolean,
-      can_expand: boolean
+      can_expand: boolean,
+      children: [],
+      expanded: false
+    }
+  ]
+}
+```
+
+#### **NEW**: Expand Individual Dependencies
+```http
+POST /api/expand-dependency/{session_id}/{sheet_name}/{cell_address}
+Response: {
+  dependencies: [
+    {
+      name: string,
+      cell_reference: string,
+      value: number, 
+      formula: string,
+      is_leaf: boolean,
+      can_expand: boolean,
+      children: [],
+      expanded: false
     }
   ]
 }
@@ -163,12 +192,15 @@ Response: {
 - Analyze button
 - Tab interface (Table View / Graph View)
 
-#### Tabular Drill-Down
-- Hierarchical table with expand/collapse
-- Visual indentation for dependency levels
+#### **ENHANCED**: Multi-Level Tabular Drill-Down
+- **NEW**: True nested hierarchical tree structure
+- **NEW**: Click on ANY formula cell to expand its dependencies
+- **NEW**: Unlimited depth exploration with individual branch control
+- Visual indentation for dependency levels (up to 5 levels)
 - Cell values and formulas display
-- Click-to-expand functionality
-- Loading states for progressive expansion
+- **NEW**: Independent expand/collapse for each dependency
+- **NEW**: Individual loading states for each cell expansion
+- Drivers appear above formulas (proper financial modeling flow)
 
 ### Technology Stack
 - **Backend**: FastAPI, Python 3.8+, openpyxl

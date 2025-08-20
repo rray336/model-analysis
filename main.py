@@ -1,5 +1,12 @@
 """
 Main FastAPI application serving both API and React frontend
+
+Features:
+- Single Excel file upload and analysis
+- Multi-level drill-down capabilities with true nested expansion
+- Click on any formula cell to explore its dependencies
+- Progressive dependency tree visualization
+- Session-based file management
 """
 import uuid
 import os
@@ -34,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Financial Model Analyzer",
+    title="Model Analysis",
     description="Single file Excel financial model analyzer with drill-down capabilities",
     version="1.0.0"
 )
@@ -214,7 +221,9 @@ async def drill_down_cell(
                 formula=dep.formula,
                 is_leaf=dep.is_leaf_node,
                 can_expand=not dep.is_leaf_node and len(dep.dependencies) == 0,  # Has formula but not yet expanded
-                depth=depth
+                depth=depth,
+                children=[],
+                expanded=False
             ))
         
         return DrillDownResponse(
@@ -230,10 +239,63 @@ async def drill_down_cell(
         logger.error(f"Error drilling down cell {sheet_name}!{cell_address}: {e}")
         raise HTTPException(status_code=500, detail=f"Error drilling down: {str(e)}")
 
+@app.post("/api/expand-dependency/{session_id}/{sheet_name}/{cell_address}")
+async def expand_dependency(
+    session_id: str,
+    sheet_name: str, 
+    cell_address: str
+):
+    """Expand a specific dependency to show its children"""
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Validate cell address format  
+    if not validate_cell_address(cell_address):
+        raise HTTPException(status_code=400, detail="Invalid cell address format")
+    
+    session_data = sessions[session_id]
+    file_path = session_data["file_path"]
+    
+    # Validate sheet name
+    if sheet_name not in session_data["sheets"]:
+        raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name}' not found")
+    
+    try:
+        # Get dependencies for this specific cell
+        dependencies = formula_analyzer.get_progressive_dependencies(
+            file_path, sheet_name, cell_address.upper(), depth=1
+        )
+        
+        if not dependencies:
+            dependencies = []
+        
+        # Convert to API response format
+        dependency_list = []
+        for dep in dependencies:
+            dependency_list.append(DependencyInfo(
+                name=dep.name,
+                cell_reference=dep.cell_reference,
+                value=dep.value,
+                formula=dep.formula,
+                is_leaf=dep.is_leaf_node,
+                can_expand=not dep.is_leaf_node,
+                depth=1,
+                children=[],
+                expanded=False
+            ))
+        
+        return {"dependencies": dependency_list}
+        
+    except Exception as e:
+        logger.error(f"Error expanding dependency {sheet_name}!{cell_address}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error expanding dependency: {str(e)}")
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "service": "Financial Model Analyzer"}
+    return {"status": "healthy", "service": "Model Analysis"}
 
 @app.delete("/api/sessions/{session_id}")
 async def cleanup_session(session_id: str):

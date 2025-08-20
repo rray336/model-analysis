@@ -8,15 +8,13 @@ interface DrillDownTableProps {
   cellInfo: CellInfo;
 }
 
-interface ExpandedDependency extends DependencyInfo {
-  expanded: boolean;
-  children: DependencyInfo[];
-  loading: boolean;
+interface NestedDependencyInfo extends DependencyInfo {
+  loading?: boolean;
 }
 
 export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellInfo }) => {
   const [drillDownData, setDrillDownData] = useState<DrillDownResponse | null>(null);
-  const [expandedDeps, setExpandedDeps] = useState<Map<string, ExpandedDependency>>(new Map());
+  const [dependencies, setDependencies] = useState<NestedDependencyInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<'table' | 'graph'>('table');
@@ -36,18 +34,15 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
       );
 
       setDrillDownData(data);
-
-      // Initialize expanded dependencies map
-      const initialExpanded = new Map<string, ExpandedDependency>();
-      data.dependencies.forEach(dep => {
-        initialExpanded.set(dep.cell_reference, {
-          ...dep,
-          expanded: false,
-          children: [],
-          loading: false
-        });
-      });
-      setExpandedDeps(initialExpanded);
+      
+      // Initialize nested dependencies structure
+      const nestedDeps: NestedDependencyInfo[] = data.dependencies.map(dep => ({
+        ...dep,
+        children: [],
+        expanded: false,
+        loading: false
+      }));
+      setDependencies(nestedDeps);
 
     } catch (error: any) {
       setError(error.response?.data?.message || 'Error loading drill-down data');
@@ -56,129 +51,158 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
     }
   }, [sessionId, cellInfo]);
 
-  const expandDependency = useCallback(async (dependency: DependencyInfo) => {
-    if (dependency.is_leaf || !dependency.can_expand) return;
-
-    // Parse cell reference to get sheet and address
-    const [sheetName, cellAddress] = dependency.cell_reference.includes('!') 
-      ? dependency.cell_reference.split('!')
-      : [cellInfo.sheet_name, dependency.cell_reference];
-
-    setExpandedDeps(prev => {
-      const updated = new Map(prev);
-      const current = updated.get(dependency.cell_reference);
-      if (current) {
-        updated.set(dependency.cell_reference, { ...current, loading: true });
-      }
-      return updated;
-    });
-
-    try {
-      const data = await ApiService.drillDownCell(
-        sessionId,
-        sheetName,
-        cellAddress,
-        dependency.depth + 1
-      );
-
-      setExpandedDeps(prev => {
-        const updated = new Map(prev);
-        const current = updated.get(dependency.cell_reference);
-        if (current) {
-          updated.set(dependency.cell_reference, {
-            ...current,
-            expanded: true,
-            children: data.dependencies,
-            loading: false
-          });
+  const expandDependency = useCallback(async (targetCellRef: string) => {
+    // Find the dependency in our nested structure
+    const updateDependencyInTree = (deps: NestedDependencyInfo[], cellRef: string): NestedDependencyInfo[] => {
+      return deps.map(dep => {
+        if (dep.cell_reference === cellRef) {
+          if (dep.is_leaf || !dep.can_expand) return dep;
+          
+          return { ...dep, loading: true };
         }
-        return updated;
+        if (dep.children.length > 0) {
+          return { ...dep, children: updateDependencyInTree(dep.children, cellRef) };
+        }
+        return dep;
       });
-
+    };
+    
+    // Set loading state
+    setDependencies(prev => updateDependencyInTree(prev, targetCellRef));
+    
+    try {
+      // Parse cell reference to get sheet and address
+      const [sheetName, cellAddress] = targetCellRef.includes('!') 
+        ? targetCellRef.split('!')
+        : [cellInfo.sheet_name, targetCellRef];
+      
+      const data = await ApiService.expandDependency(sessionId, sheetName, cellAddress);
+      
+      // Update the tree with expanded children
+      const updateWithChildren = (deps: NestedDependencyInfo[], cellRef: string): NestedDependencyInfo[] => {
+        return deps.map(dep => {
+          if (dep.cell_reference === cellRef) {
+            const newChildren: NestedDependencyInfo[] = data.dependencies.map(childDep => ({
+              ...childDep,
+              children: [],
+              expanded: false,
+              loading: false
+            }));
+            
+            return {
+              ...dep,
+              expanded: true,
+              children: newChildren,
+              loading: false
+            };
+          }
+          if (dep.children.length > 0) {
+            return { ...dep, children: updateWithChildren(dep.children, cellRef) };
+          }
+          return dep;
+        });
+      };
+      
+      setDependencies(prev => updateWithChildren(prev, targetCellRef));
+      
     } catch (error: any) {
       setError(error.response?.data?.message || 'Error expanding dependency');
-      setExpandedDeps(prev => {
-        const updated = new Map(prev);
-        const current = updated.get(dependency.cell_reference);
-        if (current) {
-          updated.set(dependency.cell_reference, { ...current, loading: false });
-        }
-        return updated;
-      });
+      
+      // Remove loading state on error
+      const removeLoading = (deps: NestedDependencyInfo[], cellRef: string): NestedDependencyInfo[] => {
+        return deps.map(dep => {
+          if (dep.cell_reference === cellRef) {
+            return { ...dep, loading: false };
+          }
+          if (dep.children.length > 0) {
+            return { ...dep, children: removeLoading(dep.children, cellRef) };
+          }
+          return dep;
+        });
+      };
+      
+      setDependencies(prev => removeLoading(prev, targetCellRef));
     }
   }, [sessionId, cellInfo.sheet_name]);
 
-  const toggleExpansion = useCallback((dependency: DependencyInfo) => {
-    const expanded = expandedDeps.get(dependency.cell_reference);
-    
-    if (!expanded?.expanded && dependency.can_expand) {
-      expandDependency(dependency);
-    } else if (expanded?.expanded) {
-      setExpandedDeps(prev => {
-        const updated = new Map(prev);
-        const current = updated.get(dependency.cell_reference);
-        if (current) {
-          updated.set(dependency.cell_reference, { ...current, expanded: false });
-        }
-        return updated;
-      });
+  const toggleExpansion = useCallback((dependency: NestedDependencyInfo) => {
+    if (!dependency.expanded && dependency.can_expand) {
+      expandDependency(dependency.cell_reference);
+    } else if (dependency.expanded) {
+      // Collapse the dependency
+      const collapseDependency = (deps: NestedDependencyInfo[], cellRef: string): NestedDependencyInfo[] => {
+        return deps.map(dep => {
+          if (dep.cell_reference === cellRef) {
+            return { ...dep, expanded: false };
+          }
+          if (dep.children.length > 0) {
+            return { ...dep, children: collapseDependency(dep.children, cellRef) };
+          }
+          return dep;
+        });
+      };
+      
+      setDependencies(prev => collapseDependency(prev, dependency.cell_reference));
     }
-  }, [expandedDeps, expandDependency]);
+  }, [expandDependency]);
 
-  const renderDependencyRow = (dep: DependencyInfo | ExpandedDependency, level: number = 1) => {
-    const expanded = expandedDeps.get(dep.cell_reference);
-    const isExpanded = expanded?.expanded || false;
-    const isLoading = expanded?.loading || false;
-    const children = expanded?.children || [];
-
+  const renderDependencyRow = (dep: NestedDependencyInfo, level: number = 1): React.ReactElement[] => {
     const levelClass = `dependency-level-${Math.min(level, 5)}`;
     const indentStyle = { paddingLeft: `${level * 16}px` };
+    const isLoading = dep.loading || false;
 
-    return (
-      <React.Fragment key={dep.cell_reference}>
-        {/* Render children first (drivers/inputs appear above the formula that uses them) */}
-        {isExpanded && children.map(child => renderDependencyRow(child, level + 1))}
-        
-        <tr className={`expandable-row ${levelClass}`}>
-          <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200" style={indentStyle}>
-            <div className="flex items-center">
-              {dep.can_expand && !dep.is_leaf ? (
-                <button
-                  onClick={() => toggleExpansion(dep)}
-                  className="flex items-center justify-center w-6 h-6 mr-2 hover:bg-gray-100 rounded"
-                  disabled={isLoading}
-                >
-                  {isLoading ? (
-                    <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                  ) : isExpanded ? (
-                    <ChevronDown className="w-4 h-4 text-gray-600" />
-                  ) : (
-                    <ChevronRight className="w-4 h-4 text-gray-600" />
-                  )}
-                </button>
-              ) : (
-                <div className="w-6 mr-2"></div>
-              )}
-              <Calculator className="w-4 h-4 text-gray-400 mr-2" />
-              <span className="font-mono text-sm">{dep.cell_reference}</span>
-            </div>
-          </td>
-          <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200 text-right font-mono">
-            {dep.value.toLocaleString()}
-          </td>
-          <td className="px-4 py-3 text-sm text-gray-600 border-b border-gray-200 font-mono max-w-xs truncate">
-            {dep.formula || 'Constant'}
-          </td>
-          <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200">
-            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-              dep.is_leaf ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
-            }`}>
-              {dep.is_leaf ? 'Constant' : 'Formula'}
-            </span>
-          </td>
-        </tr>
-      </React.Fragment>
+    const rows: React.ReactElement[] = [];
+    
+    // Render children first (drivers/inputs appear above the formula that uses them)
+    if (dep.expanded && dep.children.length > 0) {
+      dep.children.forEach(child => {
+        rows.push(...renderDependencyRow(child, level + 1));
+      });
+    }
+    
+    // Then render the current dependency
+    rows.push(
+      <tr key={dep.cell_reference} className={`expandable-row ${levelClass}`}>
+        <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200" style={indentStyle}>
+          <div className="flex items-center">
+            {dep.can_expand && !dep.is_leaf ? (
+              <button
+                onClick={() => toggleExpansion(dep)}
+                className="flex items-center justify-center w-6 h-6 mr-2 hover:bg-gray-100 rounded"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                ) : dep.expanded ? (
+                  <ChevronDown className="w-4 h-4 text-gray-600" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-gray-600" />
+                )}
+              </button>
+            ) : (
+              <div className="w-6 mr-2"></div>
+            )}
+            <Calculator className="w-4 h-4 text-gray-400 mr-2" />
+            <span className="font-mono text-sm">{dep.cell_reference}</span>
+          </div>
+        </td>
+        <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200 text-right font-mono">
+          {dep.value.toLocaleString()}
+        </td>
+        <td className="px-4 py-3 text-sm text-gray-600 border-b border-gray-200 font-mono max-w-xs truncate">
+          {dep.formula || 'Constant'}
+        </td>
+        <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200">
+          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+            dep.is_leaf ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
+          }`}>
+            {dep.is_leaf ? 'Constant' : 'Formula'}
+          </span>
+        </td>
+      </tr>
     );
+    
+    return rows;
   };
 
   // Load initial data when component mounts or cellInfo changes
@@ -303,7 +327,7 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
                         </tr>
                       </thead>
                       <tbody>
-                        {drillDownData.dependencies.map(dep => renderDependencyRow(dep, 1))}
+                        {dependencies.map(dep => renderDependencyRow(dep, 1)).flat()}
                       </tbody>
                     </table>
                   </div>

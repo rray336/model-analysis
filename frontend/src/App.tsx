@@ -62,7 +62,7 @@ function App() {
                 <div className="flex items-center">
                   <Calculator className="h-8 w-8 text-primary-600" />
                   <h1 className="ml-3 text-xl font-bold text-gray-900">
-                    Financial Model Analyzer
+                    Model Analysis
                   </h1>
                 </div>
               </div>
@@ -127,7 +127,7 @@ function App() {
       <footer className="bg-white border-t border-gray-200 mt-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="text-center text-sm text-gray-600">
-            <p>Financial Model Analyzer - Single file Excel formula analysis with progressive drill-down</p>
+            <p>Model Analysis - Single file Excel formula analysis with progressive drill-down</p>
           </div>
         </div>
       </footer>

@@ -31,6 +31,8 @@ class DependencyInfo(BaseModel):
     is_leaf: bool = False
     can_expand: bool = False
     depth: int = 1
+    children: List['DependencyInfo'] = []
+    expanded: bool = False
 
 class DrillDownResponse(BaseModel):
     """Response for progressive drill-down"""
@@ -52,3 +54,6 @@ class ErrorResponse(BaseModel):
     error: str
     message: str
     details: Optional[str] = None
+
+# Update forward references
+DependencyInfo.model_rebuild()

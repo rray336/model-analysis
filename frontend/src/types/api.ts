@@ -23,6 +23,8 @@ export interface DependencyInfo {
   is_leaf: boolean;
   can_expand: boolean;
   depth: number;
+  children: DependencyInfo[];
+  expanded: boolean;
 }
 
 export interface DrillDownResponse {

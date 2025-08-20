@@ -1,7 +1,7 @@
 {
-  "name": "financial-model-analyzer",
+  "name": "model-analysis",
   "version": "1.0.0",
-  "description": "Single file Excel financial model analyzer with drill-down capabilities",
+  "description": "Single file Excel model analyzer with drill-down capabilities",
   "scripts": {
     "build": "cd frontend && npm run build",
     "dev": "cd frontend && npm run dev",
