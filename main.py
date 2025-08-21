@@ -7,6 +7,7 @@ Features:
 - Click on any formula cell to explore its dependencies
 - Progressive dependency tree visualization
 - Session-based file management
+- AI-powered contextual naming with Google Gemini
 """
 import uuid
 import os
@@ -15,6 +16,10 @@ from pathlib import Path
 from typing import List
 import logging
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
@@ -26,13 +31,21 @@ from backend.app.models.analysis import (
     CellInfo, 
     DrillDownResponse, 
     DependencyInfo,
-    ErrorResponse
+    ErrorResponse,
+    RowValue,
+    AIBatchResult,
+    AIBatchRequest,
+    AINameResult
 )
 from backend.app.services.formula_analyzer import FormulaAnalyzer
+from backend.app.services.ai_naming_service import AINameService
 from backend.app.utils.excel_utils import (
     ExcelReader, 
     get_cell_value_and_formula, 
-    validate_cell_address
+    validate_cell_address,
+    get_row_values,
+    get_cell_name_from_column,
+    parse_cell_address
 )
 
 # Configure logging
@@ -57,6 +70,7 @@ app.add_middleware(
 
 # Initialize services
 formula_analyzer = FormulaAnalyzer()
+ai_naming_service = AINameService()
 
 # Create uploads directory
 UPLOADS_DIR = Path("backend/uploads")
@@ -64,6 +78,15 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Store session data in memory (use database for production)
 sessions: dict = {}
+
+# Store naming configurations per session: {session_id: {sheet_name: column_letter}}
+naming_configs: dict = {}
+
+# Store AI processed cells per session: {session_id: {sheet_name: {cell_ref: ai_result}}}
+ai_processed_cells: dict = {}
+
+# Store manually edited AI names per session: {session_id: {sheet_name: {cell_ref: manual_name}}}
+manual_ai_edits: dict = {}
 
 
 @app.post("/api/upload", response_model=UploadResponse)
@@ -211,9 +234,56 @@ async def drill_down_cell(
         if not dependencies:
             dependencies = []
         
-        # Convert to API response format
+        # Convert to API response format with name resolution
         dependency_list = []
         for dep in dependencies:
+            resolved_name = None
+            name_source = None
+            row_values_data = None
+            
+            # Check if this dependency has a configured naming column
+            if session_id in naming_configs:
+                # Parse cell reference to get sheet and row
+                if '!' in dep.cell_reference:
+                    dep_sheet, dep_cell = dep.cell_reference.split('!', 1)
+                    try:
+                        _, row_num = parse_cell_address(dep_cell)
+                        if dep_sheet in naming_configs[session_id]:
+                            column_letter = naming_configs[session_id][dep_sheet]
+                            resolved_name = get_cell_name_from_column(file_path, dep_sheet, row_num, column_letter)
+                            if resolved_name:
+                                name_source = f"Column {column_letter}"
+                    except:
+                        pass
+            
+            # If no resolved name, get row values for dropdown
+            if not resolved_name and '!' in dep.cell_reference:
+                dep_sheet, dep_cell = dep.cell_reference.split('!', 1)
+                try:
+                    _, row_num = parse_cell_address(dep_cell)
+                    row_values = get_row_values(file_path, dep_sheet, row_num)
+                    row_values_data = [RowValue(**rv) for rv in row_values]
+                except:
+                    pass
+            
+            # Check for AI naming data
+            ai_name = None
+            ai_confidence = None
+            ai_status = None
+            is_manually_edited = False
+            
+            if session_id in ai_processed_cells and dep.cell_reference in ai_processed_cells[session_id].get(sheet_name, {}):
+                ai_result = ai_processed_cells[session_id][sheet_name][dep.cell_reference]
+                ai_name = ai_result.get('suggested_name')
+                ai_confidence = ai_result.get('confidence')
+                ai_status = ai_result.get('status')
+            
+            # Check for manual edits
+            if session_id in manual_ai_edits and dep.cell_reference in manual_ai_edits[session_id].get(sheet_name, {}):
+                ai_name = manual_ai_edits[session_id][sheet_name][dep.cell_reference]
+                is_manually_edited = True
+                ai_status = "success"  # Manual edit counts as success
+            
             dependency_list.append(DependencyInfo(
                 name=dep.name,
                 cell_reference=dep.cell_reference,
@@ -223,7 +293,14 @@ async def drill_down_cell(
                 can_expand=not dep.is_leaf_node and len(dep.dependencies) == 0,  # Has formula but not yet expanded
                 depth=depth,
                 children=[],
-                expanded=False
+                expanded=False,
+                resolved_name=resolved_name,
+                name_source=name_source,
+                row_values=row_values_data,
+                ai_name=ai_name,
+                ai_confidence=ai_confidence,
+                ai_status=ai_status,
+                is_manually_edited=is_manually_edited
             ))
         
         return DrillDownResponse(
@@ -271,9 +348,56 @@ async def expand_dependency(
         if not dependencies:
             dependencies = []
         
-        # Convert to API response format
+        # Convert to API response format with name resolution
         dependency_list = []
         for dep in dependencies:
+            resolved_name = None
+            name_source = None
+            row_values_data = None
+            
+            # Check if this dependency has a configured naming column
+            if session_id in naming_configs:
+                # Parse cell reference to get sheet and row
+                if '!' in dep.cell_reference:
+                    dep_sheet, dep_cell = dep.cell_reference.split('!', 1)
+                    try:
+                        _, row_num = parse_cell_address(dep_cell)
+                        if dep_sheet in naming_configs[session_id]:
+                            column_letter = naming_configs[session_id][dep_sheet]
+                            resolved_name = get_cell_name_from_column(session_data["file_path"], dep_sheet, row_num, column_letter)
+                            if resolved_name:
+                                name_source = f"Column {column_letter}"
+                    except:
+                        pass
+            
+            # If no resolved name, get row values for dropdown
+            if not resolved_name and '!' in dep.cell_reference:
+                dep_sheet, dep_cell = dep.cell_reference.split('!', 1)
+                try:
+                    _, row_num = parse_cell_address(dep_cell)
+                    row_values = get_row_values(session_data["file_path"], dep_sheet, row_num)
+                    row_values_data = [RowValue(**rv) for rv in row_values]
+                except:
+                    pass
+            
+            # Check for AI naming data
+            ai_name = None
+            ai_confidence = None
+            ai_status = None
+            is_manually_edited = False
+            
+            if session_id in ai_processed_cells and dep.cell_reference in ai_processed_cells[session_id].get(sheet_name, {}):
+                ai_result = ai_processed_cells[session_id][sheet_name][dep.cell_reference]
+                ai_name = ai_result.get('suggested_name')
+                ai_confidence = ai_result.get('confidence')
+                ai_status = ai_result.get('status')
+            
+            # Check for manual edits
+            if session_id in manual_ai_edits and dep.cell_reference in manual_ai_edits[session_id].get(sheet_name, {}):
+                ai_name = manual_ai_edits[session_id][sheet_name][dep.cell_reference]
+                is_manually_edited = True
+                ai_status = "success"  # Manual edit counts as success
+            
             dependency_list.append(DependencyInfo(
                 name=dep.name,
                 cell_reference=dep.cell_reference,
@@ -283,7 +407,14 @@ async def expand_dependency(
                 can_expand=not dep.is_leaf_node,
                 depth=1,
                 children=[],
-                expanded=False
+                expanded=False,
+                resolved_name=resolved_name,
+                name_source=name_source,
+                row_values=row_values_data,
+                ai_name=ai_name,
+                ai_confidence=ai_confidence,
+                ai_status=ai_status,
+                is_manually_edited=is_manually_edited
             ))
         
         return {"dependencies": dependency_list}
@@ -291,6 +422,183 @@ async def expand_dependency(
     except Exception as e:
         logger.error(f"Error expanding dependency {sheet_name}!{cell_address}: {e}")
         raise HTTPException(status_code=500, detail=f"Error expanding dependency: {str(e)}")
+
+@app.get("/api/row-values/{session_id}/{sheet_name}/{row_number}")
+async def get_row_values_endpoint(session_id: str, sheet_name: str, row_number: int):
+    """Get values from a specific row for column selection dropdown"""
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session_data = sessions[session_id]
+    file_path = session_data["file_path"]
+    
+    # Validate sheet name
+    if sheet_name not in session_data["sheets"]:
+        raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name}' not found")
+    
+    try:
+        row_values = get_row_values(file_path, sheet_name, row_number)
+        return {"row_values": [RowValue(**rv) for rv in row_values]}
+        
+    except Exception as e:
+        logger.error(f"Error getting row values for {sheet_name}!{row_number}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting row values: {str(e)}")
+
+@app.post("/api/configure-sheet-naming/{session_id}/{sheet_name}/{column_letter}")
+async def configure_sheet_naming(session_id: str, sheet_name: str, column_letter: str):
+    """Configure which column to use for naming cells in a specific sheet"""
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session_data = sessions[session_id]
+    
+    # Validate sheet name
+    if sheet_name not in session_data["sheets"]:
+        raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name}' not found")
+    
+    # Initialize naming config for session if not exists
+    if session_id not in naming_configs:
+        naming_configs[session_id] = {}
+    
+    # Store the column mapping
+    naming_configs[session_id][sheet_name] = column_letter.upper()
+    
+    logger.info(f"Configured sheet '{sheet_name}' to use column '{column_letter}' for names in session {session_id}")
+    
+    return {
+        "message": f"Sheet '{sheet_name}' configured to use column '{column_letter}' for names",
+        "sheet_name": sheet_name,
+        "column": column_letter.upper()
+    }
+
+@app.get("/api/naming-config/{session_id}")
+async def get_naming_config(session_id: str):
+    """Get current naming configuration for a session"""
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    config = naming_configs.get(session_id, {})
+    return {"naming_config": config}
+
+@app.post("/api/generate-ai-names/{session_id}/{sheet_name}")
+async def generate_ai_names(session_id: str, sheet_name: str, request: AIBatchRequest):
+    """Generate AI names for a batch of cells in a sheet"""
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session_data = sessions[session_id]
+    file_path = session_data["file_path"]
+    
+    # Validate sheet name
+    if sheet_name not in session_data["sheets"]:
+        raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name}' not found")
+    
+    try:
+        # Filter out already processed cells
+        unprocessed_cells = []
+        for cell_ref in request.unprocessed_cells:
+            # Skip if already AI processed or manually edited
+            if session_id in ai_processed_cells and cell_ref in ai_processed_cells[session_id].get(sheet_name, {}):
+                continue
+            if session_id in manual_ai_edits and cell_ref in manual_ai_edits[session_id].get(sheet_name, {}):
+                continue
+            unprocessed_cells.append(cell_ref)
+        
+        if not unprocessed_cells:
+            return {"message": "All cells already processed", "results": {}, "failed_cells": [], "processing_stats": {"total_cells": 0, "successful": 0, "failed": 0}}
+        
+        # Call AI service
+        batch_result = await ai_naming_service.generate_batch_names(
+            file_path, sheet_name, unprocessed_cells
+        )
+        
+        # Store results in session
+        if session_id not in ai_processed_cells:
+            ai_processed_cells[session_id] = {}
+        if sheet_name not in ai_processed_cells[session_id]:
+            ai_processed_cells[session_id][sheet_name] = {}
+        
+        # Convert AINameResult objects to dict for storage
+        for cell_ref, ai_result in batch_result.results.items():
+            ai_processed_cells[session_id][sheet_name][cell_ref] = {
+                "suggested_name": ai_result.suggested_name,
+                "confidence": ai_result.confidence,
+                "status": ai_result.status,
+                "error_message": ai_result.error_message
+            }
+        
+        logger.info(f"Generated AI names for {len(unprocessed_cells)} cells in {sheet_name}")
+        
+        return {
+            "message": f"Generated AI names for {len(unprocessed_cells)} cells",
+            "results": {cell_ref: {
+                "cell_reference": result.cell_reference,
+                "suggested_name": result.suggested_name,
+                "confidence": result.confidence,
+                "status": result.status,
+                "error_message": result.error_message
+            } for cell_ref, result in batch_result.results.items()},
+            "failed_cells": batch_result.failed_cells,
+            "processing_stats": batch_result.processing_stats
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating AI names for {sheet_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error generating AI names: {str(e)}")
+
+@app.get("/api/ai-processed-cells/{session_id}/{sheet_name}")
+async def get_ai_processed_cells(session_id: str, sheet_name: str):
+    """Get list of already AI-processed cells for a sheet"""
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Get processed cells
+    processed_cells = []
+    if session_id in ai_processed_cells and sheet_name in ai_processed_cells[session_id]:
+        processed_cells.extend(ai_processed_cells[session_id][sheet_name].keys())
+    
+    # Add manually edited cells
+    if session_id in manual_ai_edits and sheet_name in manual_ai_edits[session_id]:
+        processed_cells.extend(manual_ai_edits[session_id][sheet_name].keys())
+    
+    return {"processed_cells": list(set(processed_cells))}
+
+@app.post("/api/mark-manual-edit/{session_id}/{sheet_name}/{cell_address}")
+async def mark_manual_edit(session_id: str, sheet_name: str, cell_address: str, request_body: dict):
+    """Mark a cell as manually edited with user-provided name"""
+    
+    manual_name = request_body.get("manual_name", "")
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Initialize structures if needed
+    if session_id not in manual_ai_edits:
+        manual_ai_edits[session_id] = {}
+    if sheet_name not in manual_ai_edits[session_id]:
+        manual_ai_edits[session_id][sheet_name] = {}
+    
+    # Store manual edit
+    manual_ai_edits[session_id][sheet_name][cell_address] = manual_name
+    
+    logger.info(f"Marked {sheet_name}!{cell_address} as manually edited: '{manual_name}'")
+    
+    return {
+        "message": f"Cell {cell_address} marked as manually edited",
+        "cell_address": cell_address,
+        "manual_name": manual_name
+    }
 
 @app.get("/api/health")
 async def health_check():
@@ -311,6 +619,16 @@ async def cleanup_session(session_id: str):
         
         # Remove from memory
         del sessions[session_id]
+        
+        # Clean up naming config
+        if session_id in naming_configs:
+            del naming_configs[session_id]
+        
+        # Clean up AI data
+        if session_id in ai_processed_cells:
+            del ai_processed_cells[session_id]
+        if session_id in manual_ai_edits:
+            del manual_ai_edits[session_id]
         
         return {"message": f"Session {session_id} cleaned up successfully"}
         

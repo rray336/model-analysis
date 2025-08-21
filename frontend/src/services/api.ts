@@ -1,5 +1,5 @@
 import axios, { AxiosResponse } from 'axios';
-import { UploadResponse, CellInfo, DrillDownResponse, DependencyInfo } from '../types/api';
+import { UploadResponse, CellInfo, DrillDownResponse, DependencyInfo, RowValue, AIBatchResult } from '../types/api';
 
 const API_BASE_URL = '/api';
 
@@ -61,6 +61,73 @@ export class ApiService {
   
   static async cleanupSession(sessionId: string): Promise<{ message: string }> {
     const response = await api.delete(`/sessions/${sessionId}`);
+    return response.data;
+  }
+  
+  static async getRowValues(
+    sessionId: string,
+    sheetName: string,
+    rowNumber: number
+  ): Promise<{ row_values: RowValue[] }> {
+    const response = await api.get(
+      `/row-values/${sessionId}/${encodeURIComponent(sheetName)}/${rowNumber}`
+    );
+    return response.data;
+  }
+  
+  static async configureSheetNaming(
+    sessionId: string,
+    sheetName: string,
+    columnLetter: string
+  ): Promise<{ message: string; sheet_name: string; column: string }> {
+    const response = await api.post(
+      `/configure-sheet-naming/${sessionId}/${encodeURIComponent(sheetName)}/${columnLetter}`
+    );
+    return response.data;
+  }
+  
+  static async getNamingConfig(sessionId: string): Promise<{ naming_config: Record<string, string> }> {
+    const response = await api.get(`/naming-config/${sessionId}`);
+    return response.data;
+  }
+  
+  static async generateAINames(
+    sessionId: string,
+    sheetName: string,
+    unprocessedCells: string[]
+  ): Promise<AIBatchResult & { message: string }> {
+    const response = await api.post(
+      `/generate-ai-names/${sessionId}/${encodeURIComponent(sheetName)}`,
+      {
+        session_id: sessionId,
+        sheet_name: sheetName,
+        unprocessed_cells: unprocessedCells
+      }
+    );
+    return response.data;
+  }
+  
+  static async getAIProcessedCells(
+    sessionId: string,
+    sheetName: string
+  ): Promise<{ processed_cells: string[] }> {
+    const response = await api.get(
+      `/ai-processed-cells/${sessionId}/${encodeURIComponent(sheetName)}`
+    );
+    return response.data;
+  }
+  
+  static async markManualEdit(
+    sessionId: string,
+    sheetName: string,
+    cellAddress: string,
+    manualName: string
+  ): Promise<{ message: string; cell_address: string; manual_name: string }> {
+    const response = await api.post(
+      `/mark-manual-edit/${sessionId}/${encodeURIComponent(sheetName)}/${cellAddress}`,
+      { manual_name: manualName },
+      { headers: { 'Content-Type': 'application/json' } }
+    );
     return response.data;
   }
   

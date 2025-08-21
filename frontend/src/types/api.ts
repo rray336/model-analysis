@@ -15,6 +15,30 @@ export interface CellInfo {
   has_external_refs: boolean;
 }
 
+export interface RowValue {
+  column: string;
+  value: string;
+  is_meaningful: boolean;
+}
+
+export interface AINameResult {
+  cell_reference: string;
+  suggested_name?: string;
+  confidence: number;
+  status: 'success' | 'failed';
+  error_message?: string;
+}
+
+export interface AIBatchResult {
+  results: Record<string, AINameResult>;
+  failed_cells: string[];
+  processing_stats: {
+    total_cells: number;
+    successful: number;
+    failed: number;
+  };
+}
+
 export interface DependencyInfo {
   name: string;
   cell_reference: string;
@@ -25,6 +49,13 @@ export interface DependencyInfo {
   depth: number;
   children: DependencyInfo[];
   expanded: boolean;
+  resolved_name?: string;
+  name_source?: string;
+  row_values?: RowValue[];
+  ai_name?: string;
+  ai_confidence?: number;
+  ai_status?: 'success' | 'failed';
+  is_manually_edited?: boolean;
 }
 
 export interface DrillDownResponse {

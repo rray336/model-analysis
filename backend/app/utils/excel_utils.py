@@ -174,6 +174,72 @@ def detect_financial_keywords(text: str) -> Dict[str, int]:
     
     return scores
 
+def get_row_values(workbook_path: Path, sheet_name: str, row_number: int, max_columns: int = 6) -> List[Dict[str, Any]]:
+    """Get values from a specific row for column selection dropdown"""
+    try:
+        wb = openpyxl.load_workbook(workbook_path, data_only=True)
+        
+        if sheet_name not in wb.sheetnames:
+            logger.warning(f"Sheet '{sheet_name}' not found in workbook")
+            return []
+        
+        sheet = wb[sheet_name]
+        row_values = []
+        
+        for col in range(1, min(max_columns + 1, sheet.max_column + 1)):
+            cell = sheet.cell(row=row_number, column=col)
+            column_letter = get_column_letter(col)
+            
+            # Convert value to string for display
+            display_value = ""
+            if cell.value is not None:
+                if isinstance(cell.value, (int, float)):
+                    display_value = str(cell.value)
+                elif isinstance(cell.value, datetime):
+                    display_value = cell.value.strftime("%Y-%m-%d")
+                else:
+                    display_value = str(cell.value)
+            
+            row_values.append({
+                "column": column_letter,
+                "value": display_value,
+                "is_meaningful": len(display_value.strip()) > 0 and not display_value.isdigit()
+            })
+        
+        wb.close()
+        return row_values
+        
+    except Exception as e:
+        logger.error(f"Error getting row values for {sheet_name}!{row_number}: {e}")
+        return []
+
+def get_cell_name_from_column(workbook_path: Path, sheet_name: str, row_number: int, column_letter: str) -> Optional[str]:
+    """Get the name value from a specific column of a row"""
+    try:
+        wb = openpyxl.load_workbook(workbook_path, data_only=True)
+        
+        if sheet_name not in wb.sheetnames:
+            return None
+        
+        sheet = wb[sheet_name]
+        cell_address = f"{column_letter}{row_number}"
+        cell = sheet[cell_address]
+        
+        if cell.value is not None:
+            if isinstance(cell.value, (int, float)):
+                return str(cell.value)
+            elif isinstance(cell.value, datetime):
+                return cell.value.strftime("%Y-%m-%d")
+            else:
+                return str(cell.value).strip()
+        
+        wb.close()
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error getting cell name from {sheet_name}!{column_letter}{row_number}: {e}")
+        return None
+
 def analyze_cell_relationships(sheet) -> Dict[str, List[str]]:
     """
     Analyze formula relationships in a sheet

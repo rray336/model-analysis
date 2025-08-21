@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from 'react';
-import { ChevronRight, ChevronDown, Calculator, AlertCircle, BarChart3 } from 'lucide-react';
+import { ChevronRight, ChevronDown, Calculator, AlertCircle, BarChart3, Sparkles } from 'lucide-react';
 import { ApiService } from '../../services/api';
 import { CellInfo, DrillDownResponse, DependencyInfo } from '../../types/api';
+import { ColumnSelectDropdown } from './ColumnSelectDropdown';
 
 interface DrillDownTableProps {
   sessionId: string;
@@ -18,8 +19,46 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<'table' | 'graph'>('table');
+  const [, setNamingConfig] = useState<Record<string, string>>({});
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiSuccess, setAiSuccess] = useState<string | null>(null);
+  const [editingCell, setEditingCell] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState<string>('');
 
-  const loadInitialDrillDown = useCallback(async () => {
+  const loadNamingConfig = useCallback(async () => {
+    try {
+      const config = await ApiService.getNamingConfig(sessionId);
+      setNamingConfig(config.naming_config);
+    } catch (error) {
+      console.error('Error loading naming config:', error);
+    }
+  }, [sessionId]);
+
+  const handleColumnSelect = useCallback(async (cellReference: string, columnLetter: string) => {
+    try {
+      // Parse cell reference to get sheet name
+      const [sheetName] = cellReference.includes('!') 
+        ? cellReference.split('!')
+        : [cellInfo.sheet_name];
+      
+      await ApiService.configureSheetNaming(sessionId, sheetName, columnLetter);
+      
+      // Update local naming config
+      setNamingConfig(prev => ({
+        ...prev,
+        [sheetName]: columnLetter
+      }));
+      
+      // Reload drill-down data to get updated names
+      await loadInitialDrillDown();
+      
+    } catch (error: any) {
+      setError(error.response?.data?.message || 'Error configuring sheet naming');
+    }
+  }, [sessionId, cellInfo.sheet_name]);
+
+  const reloadDrillDownData = useCallback(async () => {
     if (!cellInfo.can_drill_down) return;
 
     setLoading(true);
@@ -50,6 +89,136 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
       setLoading(false);
     }
   }, [sessionId, cellInfo]);
+
+  const updateAINames = useCallback((aiResults: Record<string, any>) => {
+    // Update AI names in the dependencies state without resetting the tree structure
+    const updateDependenciesRecursively = (deps: NestedDependencyInfo[]): NestedDependencyInfo[] => {
+      return deps.map(dep => {
+        let updatedDep = { ...dep };
+        
+        // Check if this dependency has AI result
+        if (aiResults[dep.cell_reference]) {
+          const aiResult = aiResults[dep.cell_reference];
+          updatedDep = {
+            ...updatedDep,
+            ai_name: aiResult.suggested_name,
+            ai_confidence: aiResult.confidence,
+            ai_status: aiResult.status,
+            is_manually_edited: false // Reset manual edit flag for new AI names
+          };
+        }
+        
+        // Recursively update children
+        if (updatedDep.children && updatedDep.children.length > 0) {
+          updatedDep.children = updateDependenciesRecursively(updatedDep.children);
+        }
+        
+        return updatedDep;
+      });
+    };
+    
+    setDependencies(prev => updateDependenciesRecursively(prev));
+  }, []);
+
+  const handleAIGeneration = useCallback(async () => {
+    if (!drillDownData || aiGenerating) return;
+    
+    setAiGenerating(true);
+    setAiError(null);
+    setAiSuccess(null);
+    
+    try {
+      // Collect all cell references from current dependencies
+      const collectCellRefs = (deps: NestedDependencyInfo[]): string[] => {
+        const refs: string[] = [];
+        deps.forEach(dep => {
+          refs.push(dep.cell_reference);
+          if (dep.children && dep.children.length > 0) {
+            refs.push(...collectCellRefs(dep.children));
+          }
+        });
+        return refs;
+      };
+      
+      const allCellRefs = collectCellRefs(dependencies);
+      
+      if (allCellRefs.length === 0) {
+        setAiError('No cells available for AI naming');
+        return;
+      }
+      
+      // Call AI naming API
+      const result = await ApiService.generateAINames(
+        sessionId,
+        cellInfo.sheet_name,
+        allCellRefs
+      );
+      
+      if (result.processing_stats.successful > 0) {
+        // Update AI names in place without reloading the entire table
+        updateAINames(result.results);
+        setAiSuccess(`Successfully generated AI names for ${result.processing_stats.successful} cells!`);
+      }
+      
+      if (result.processing_stats.failed > 0) {
+        setAiError(`Generated names for ${result.processing_stats.successful} cells. ${result.processing_stats.failed} failed.`);
+      }
+      
+    } catch (error: any) {
+      setAiError(error.response?.data?.message || 'Failed to generate AI names');
+    } finally {
+      setAiGenerating(false);
+    }
+  }, [sessionId, cellInfo.sheet_name, drillDownData, dependencies, aiGenerating, updateAINames]);
+
+  const handleStartEdit = useCallback((cellRef: string, currentName: string) => {
+    setEditingCell(cellRef);
+    setEditValue(currentName || '');
+  }, []);
+
+  const handleSaveEdit = useCallback(async (cellRef: string) => {
+    if (!editValue.trim()) {
+      setEditingCell(null);
+      return;
+    }
+
+    try {
+      await ApiService.markManualEdit(sessionId, cellInfo.sheet_name, cellRef, editValue.trim());
+      
+      // Update local state to show manual edit immediately
+      setDependencies(prev => {
+        const updateDependency = (deps: NestedDependencyInfo[]): NestedDependencyInfo[] => {
+          return deps.map(dep => {
+            if (dep.cell_reference === cellRef) {
+              return {
+                ...dep,
+                ai_name: editValue.trim(),
+                is_manually_edited: true,
+                ai_status: 'success' as const
+              };
+            }
+            if (dep.children.length > 0) {
+              return { ...dep, children: updateDependency(dep.children) };
+            }
+            return dep;
+          });
+        };
+        return updateDependency(prev);
+      });
+
+      setEditingCell(null);
+      setEditValue('');
+    } catch (error: any) {
+      setAiError(error.response?.data?.message || 'Failed to save manual edit');
+    }
+  }, [sessionId, cellInfo.sheet_name, editValue]);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingCell(null);
+    setEditValue('');
+  }, []);
+
+  const loadInitialDrillDown = reloadDrillDownData;
 
   const expandDependency = useCallback(async (targetCellRef: string) => {
     // Find the dependency in our nested structure
@@ -186,6 +355,90 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
             <span className="font-mono text-sm">{dep.cell_reference}</span>
           </div>
         </td>
+        <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200">
+          {dep.resolved_name ? (
+            <div>
+              <span className="text-gray-900 font-medium">{dep.resolved_name}</span>
+              {dep.name_source && (
+                <span className="text-xs text-gray-500 ml-2">({dep.name_source})</span>
+              )}
+            </div>
+          ) : dep.row_values && dep.row_values.length > 0 ? (
+            <ColumnSelectDropdown
+              rowValues={dep.row_values}
+              onSelect={(columnLetter) => handleColumnSelect(dep.cell_reference, columnLetter)}
+              cellReference={dep.cell_reference}
+            />
+          ) : (
+            <span className="text-gray-400 text-sm">No name available</span>
+          )}
+        </td>
+        <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200">
+          {editingCell === dep.cell_reference ? (
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleSaveEdit(dep.cell_reference);
+                  } else if (e.key === 'Escape') {
+                    handleCancelEdit();
+                  }
+                }}
+                className="flex-1 px-2 py-1 text-sm border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                autoFocus
+              />
+              <button
+                onClick={() => handleSaveEdit(dep.cell_reference)}
+                className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+              >
+                ✓
+              </button>
+              <button
+                onClick={handleCancelEdit}
+                className="px-2 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+          ) : dep.ai_status === 'success' && dep.ai_name ? (
+            <div 
+              className="cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
+              onClick={() => handleStartEdit(dep.cell_reference, dep.ai_name || '')}
+              title="Click to edit"
+            >
+              <span className={`${dep.is_manually_edited ? 'text-red-600 font-medium' : 'text-gray-900'}`}>
+                {dep.ai_name}
+              </span>
+              {dep.ai_confidence && !dep.is_manually_edited && (
+                <span className="text-xs text-gray-500 ml-2">
+                  ({Math.round(dep.ai_confidence * 100)}%)
+                </span>
+              )}
+              {dep.is_manually_edited && (
+                <span className="text-xs text-red-500 ml-2">(edited)</span>
+              )}
+            </div>
+          ) : dep.ai_status === 'failed' ? (
+            <div 
+              className="cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
+              onClick={() => handleStartEdit(dep.cell_reference, '')}
+              title="Click to add name manually"
+            >
+              <span className="text-red-500 text-xs">AI generation failed</span>
+            </div>
+          ) : (
+            <div 
+              className="cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
+              onClick={() => handleStartEdit(dep.cell_reference, '')}
+              title="Click to add name manually"
+            >
+              <span className="text-gray-400 text-sm">Click to add name</span>
+            </div>
+          )}
+        </td>
         <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200 text-right font-mono">
           {dep.value.toLocaleString()}
         </td>
@@ -207,10 +460,11 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
 
   // Load initial data when component mounts or cellInfo changes
   React.useEffect(() => {
+    loadNamingConfig();
     if (cellInfo.can_drill_down) {
       loadInitialDrillDown();
     }
-  }, [cellInfo, loadInitialDrillDown]);
+  }, [cellInfo, loadInitialDrillDown, loadNamingConfig]);
 
   if (!cellInfo.can_drill_down) {
     return (
@@ -279,6 +533,50 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
           </div>
         )}
 
+        {aiSuccess && (
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+            <div className="flex items-center">
+              <Sparkles className="h-5 w-5 text-green-500 mr-2" />
+              <p className="text-sm text-green-900">{aiSuccess}</p>
+            </div>
+          </div>
+        )}
+
+        {aiError && (
+          <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="flex items-center">
+              <AlertCircle className="h-5 w-5 text-yellow-500 mr-2" />
+              <p className="text-sm text-yellow-900">{aiError}</p>
+            </div>
+          </div>
+        )}
+
+        {/* AI Generation Button */}
+        {drillDownData && drillDownData.dependencies.length > 0 && (
+          <div className="mb-6">
+            <button
+              onClick={handleAIGeneration}
+              disabled={aiGenerating}
+              className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-purple-400 disabled:cursor-not-allowed transition-colors"
+            >
+              {aiGenerating ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                  Generating AI Names...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  🤖 Generate AI Names
+                </>
+              )}
+            </button>
+            <p className="text-xs text-gray-600 mt-2">
+              Generate contextual names for all visible cells using AI analysis. Only unprocessed cells will be named.
+            </p>
+          </div>
+        )}
+
         {activeView === 'table' ? (
           <>
             {loading ? (
@@ -321,6 +619,8 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
                       <thead>
                         <tr>
                           <th className="text-left">Cell Reference</th>
+                          <th className="text-left">Name</th>
+                          <th className="text-left">AI Name</th>
                           <th className="text-right">Value</th>
                           <th className="text-left">Formula</th>
                           <th className="text-left">Type</th>

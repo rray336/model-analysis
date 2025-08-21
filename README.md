@@ -16,6 +16,22 @@ All core features have been implemented and tested. The application is ready for
   - Click on individual dependencies (like "Segments!BT57") to see their sub-dependencies
   - Unlimited depth exploration of formula relationships
   - Drivers appear above formulas (proper financial modeling flow)
+- **Smart Cell Naming**: Transform technical cell references into meaningful business names
+  - **New "Name" column** alongside Cell Reference for human-readable labels
+  - **Sheet-specific configuration**: Each worksheet can use different columns for names
+  - **Dropdown column selection**: Choose from row values to configure naming per sheet
+  - **Auto-propagation**: Once configured, all cells from that sheet get meaningful names
+  - **Progressive setup**: Only configure sheets when needed, others remain technical
+  - **Persistent configuration**: Settings maintained throughout the session
+- **🤖 AI-Powered Contextual Naming**: Advanced AI naming using Google Gemini
+  - **New "AI Name" column** with intelligent contextual analysis
+  - **Screenshot-based context**: AI analyzes visual Excel layout for better understanding
+  - **Batch processing**: Generate names for all visible cells with one click
+  - **Incremental updates**: Only processes new/unprocessed cells on repeated clicks
+  - **Manual editing**: Click any AI name to edit with red text indicating user changes
+  - **Confidence scores**: Shows AI confidence percentage for generated names
+  - **Error handling**: Clear indicators for failed AI generations with manual fallback
+  - **Session persistence**: AI names and manual edits persist across navigation
 - **Formula Complexity**: Automatic complexity assessment (simple, moderate, complex)
 - **External Reference Detection**: Identifies and handles external file references (stops drill-down appropriately)
 - **Interactive Tabular Visualization**: Clean hierarchical view with expandable/collapsible rows
@@ -28,6 +44,7 @@ All core features have been implemented and tested. The application is ready for
 - Python 3.8+
 - Node.js 16+
 - npm
+- **Google Gemini API Key** (for AI naming features) - Get one at [Google AI Studio](https://makersuite.google.com/app/apikey)
 
 ### Installation
 
@@ -47,6 +64,19 @@ All core features have been implemented and tested. The application is ready for
    ```bash
    npm run build
    ```
+
+4. **Configure AI (Optional)**:
+   ```bash
+   # Copy the example environment file
+   cp .env.example .env
+   
+   # Edit .env file and add your Gemini API key
+   # GEMINI_API_KEY=your_actual_api_key_here
+   ```
+   
+   Get your Gemini API key from: [Google AI Studio](https://makersuite.google.com/app/apikey)
+   
+   **Note**: The application works fully without an API key, but AI naming features will show "API not configured" messages.
 
 ### Running the Application
 
@@ -106,7 +136,7 @@ cd frontend && npm run dev
    - View value, formula, complexity, and drill-down capability
 
 5. **Multi-Level Drill-down**: 
-   - If cell has dependencies, drill-down table appears
+   - If cell has dependencies, drill-down table appears with new Name column
    - Click chevron icons OR click on ANY formula cell to expand its dependencies
    - **True nested expansion**: Each formula cell becomes clickable for further drill-down
    - **Drivers appear above the formulas that use them** (proper financial modeling flow)
@@ -114,13 +144,35 @@ cd frontend && npm run dev
    - View hierarchical relationships with visual indentation
    - Collapse/expand individual dependency branches
 
+6. **Smart Naming Workflow**:
+   - Initial view shows technical references like "Segments!BT71" with dropdown in Name column
+   - Click dropdown to see row values from first few columns: [" ", "62", "Operating Income (loss)", "-1"]
+   - Select meaningful option (e.g., "Operating Income (loss)" from column C)
+   - **All cells from that worksheet instantly get meaningful names**
+   - Other worksheets remain technical until you configure them
+   - Configuration persists throughout your analysis session
+
+7. **🤖 AI Naming Workflow**:
+   - Click **"🤖 Generate AI Names"** button above the drill-down table
+   - AI analyzes Excel context and generates contextual names for all visible cells
+   - See results in new "AI Name" column with confidence percentages
+   - **Click any AI name to edit manually** - edited names appear in red text
+   - Repeated button clicks only process newly revealed cells from drill-downs
+   - AI names persist across sheet navigation and session
+
 ## API Endpoints
 
 - `POST /api/upload` - Upload Excel file
 - `GET /api/sheets/{session_id}` - Get available sheets
 - `GET /api/analyze/{session_id}/{sheet}/{cell}` - Analyze specific cell
 - `GET /api/drill-down/{session_id}/{sheet}/{cell}?depth=N` - Initial drill-down analysis
-- `POST /api/expand-dependency/{session_id}/{sheet}/{cell}` - **NEW**: Expand individual dependencies for multi-level drill-down
+- `POST /api/expand-dependency/{session_id}/{sheet}/{cell}` - Expand individual dependencies for multi-level drill-down
+- `GET /api/row-values/{session_id}/{sheet_name}/{row_number}` - Get row values for column selection dropdown
+- `POST /api/configure-sheet-naming/{session_id}/{sheet_name}/{column_letter}` - Configure naming column for a worksheet
+- `GET /api/naming-config/{session_id}` - Get current naming configuration for session
+- `POST /api/generate-ai-names/{session_id}/{sheet_name}` - **NEW**: Generate AI names for batch of cells using Gemini
+- `GET /api/ai-processed-cells/{session_id}/{sheet_name}` - **NEW**: Get list of AI-processed cells for incremental updates
+- `POST /api/mark-manual-edit/{session_id}/{sheet_name}/{cell_address}` - **NEW**: Mark cell as manually edited with custom name
 - `DELETE /api/sessions/{session_id}` - Clean up session
 - `GET /api/health` - Health check
 

@@ -22,6 +22,12 @@ class CellInfo(BaseModel):
     complexity: str = "simple"  # simple, moderate, complex
     has_external_refs: bool = False
 
+class RowValue(BaseModel):
+    """Value from a specific column in a row"""
+    column: str
+    value: str
+    is_meaningful: bool = False
+
 class DependencyInfo(BaseModel):
     """Information about a single dependency in drill-down"""
     name: str
@@ -33,6 +39,13 @@ class DependencyInfo(BaseModel):
     depth: int = 1
     children: List['DependencyInfo'] = []
     expanded: bool = False
+    resolved_name: Optional[str] = None
+    name_source: Optional[str] = None
+    row_values: Optional[List[RowValue]] = None
+    ai_name: Optional[str] = None
+    ai_confidence: Optional[float] = None
+    ai_status: Optional[str] = None
+    is_manually_edited: bool = False
 
 class DrillDownResponse(BaseModel):
     """Response for progressive drill-down"""
@@ -48,6 +61,26 @@ class UploadResponse(BaseModel):
     session_id: str
     message: str
     sheets: List[str]
+
+class AINameResult(BaseModel):
+    """Result of AI naming for a single cell"""
+    cell_reference: str
+    suggested_name: Optional[str] = None
+    confidence: float = 0.0
+    status: str = "failed"  # "success" or "failed"
+    error_message: Optional[str] = None
+
+class AIBatchResult(BaseModel):
+    """Result of batch AI naming for multiple cells"""
+    results: Dict[str, AINameResult]
+    failed_cells: List[str] = []
+    processing_stats: Dict[str, Any] = {}
+
+class AIBatchRequest(BaseModel):
+    """Request for batch AI naming"""
+    session_id: str
+    sheet_name: str
+    unprocessed_cells: List[str]
 
 class ErrorResponse(BaseModel):
     """Error response model"""
