@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { ChevronRight, ChevronDown, Calculator, AlertCircle, BarChart3, Sparkles } from 'lucide-react';
+import { ChevronRight, ChevronDown, Calculator, AlertCircle, BarChart3, Sparkles, Camera, ToggleLeft, ToggleRight } from 'lucide-react';
 import { ApiService } from '../../services/api';
 import { CellInfo, DrillDownResponse, DependencyInfo } from '../../types/api';
 import { ColumnSelectDropdown } from './ColumnSelectDropdown';
@@ -11,7 +11,31 @@ interface DrillDownTableProps {
 
 interface NestedDependencyInfo extends DependencyInfo {
   loading?: boolean;
+  uniqueId?: string;
 }
+
+// Utility function to generate unique IDs for dependency rows
+const generateUniqueId = (cellRef: string, parentId?: string, index?: number): string => {
+  const cleanCellRef = cellRef.replace('!', '_');
+  if (parentId) {
+    return `${parentId}_${cleanCellRef}_${index || 0}`;
+  }
+  return `root_${cleanCellRef}_${index || 0}`;
+};
+
+// Utility function to assign unique IDs to dependencies recursively
+const assignUniqueIds = (deps: DependencyInfo[], parentId: string = 'root'): NestedDependencyInfo[] => {
+  return deps.map((dep, index) => {
+    const uniqueId = generateUniqueId(dep.cell_reference, parentId, index);
+    return {
+      ...dep,
+      children: [],
+      expanded: false,
+      loading: false,
+      uniqueId
+    };
+  });
+};
 
 export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellInfo }) => {
   const [drillDownData, setDrillDownData] = useState<DrillDownResponse | null>(null);
@@ -25,6 +49,7 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
   const [aiSuccess, setAiSuccess] = useState<string | null>(null);
   const [editingCell, setEditingCell] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<string>('');
+  const [nameDisplayMode, setNameDisplayMode] = useState<'manual' | 'ai'>('manual');
 
   const loadNamingConfig = useCallback(async () => {
     try {
@@ -34,6 +59,63 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
       console.error('Error loading naming config:', error);
     }
   }, [sessionId]);
+
+  // Helper function to collect all cell references from dependencies tree
+  const collectAllCellRefs = useCallback((deps: NestedDependencyInfo[]): string[] => {
+    const refs: string[] = [];
+    deps.forEach(dep => {
+      refs.push(dep.cell_reference);
+      if (dep.children && dep.children.length > 0) {
+        refs.push(...collectAllCellRefs(dep.children));
+      }
+    });
+    return refs;
+  }, []);
+
+  const updateResolvedNames = useCallback((nameResults: Record<string, any>) => {
+    // Update resolved names in the dependencies state without resetting the tree structure
+    const updateDependenciesRecursively = (deps: NestedDependencyInfo[]): NestedDependencyInfo[] => {
+      return deps.map(dep => {
+        let updatedDep = { ...dep };
+        
+        // Check if this dependency has name result
+        if (nameResults[dep.cell_reference]) {
+          const nameResult = nameResults[dep.cell_reference];
+          updatedDep = {
+            ...updatedDep,
+            resolved_name: nameResult.resolved_name,
+            name_source: nameResult.name_source,
+            row_values: nameResult.row_values
+          };
+        }
+        
+        // Recursively update children
+        if (updatedDep.children && updatedDep.children.length > 0) {
+          updatedDep.children = updateDependenciesRecursively(updatedDep.children);
+        }
+        
+        return updatedDep;
+      });
+    };
+    
+    setDependencies(prev => updateDependenciesRecursively(prev));
+  }, []);
+
+  // Name resolution logic based on toggle state
+  const getDisplayName = useCallback((dependency: NestedDependencyInfo): { name: string; source: 'manual' | 'ai' | 'fallback' } => {
+    if (nameDisplayMode === 'ai') {
+      if (dependency.ai_name && dependency.ai_name.trim()) {
+        return { name: dependency.ai_name, source: 'ai' };
+      } else if (dependency.resolved_name && dependency.resolved_name.trim()) {
+        return { name: dependency.resolved_name, source: 'manual' };
+      }
+    } else {
+      if (dependency.resolved_name && dependency.resolved_name.trim()) {
+        return { name: dependency.resolved_name, source: 'manual' };
+      }
+    }
+    return { name: dependency.cell_reference, source: 'fallback' };
+  }, [nameDisplayMode]);
 
   const handleColumnSelect = useCallback(async (cellReference: string, columnLetter: string) => {
     try {
@@ -50,13 +132,22 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
         [sheetName]: columnLetter
       }));
       
-      // Reload drill-down data to get updated names
-      await loadInitialDrillDown();
+      // Instead of full reload, update resolved names in-place
+      // Collect all cell references from current tree
+      const allCellRefs = collectAllCellRefs(dependencies);
+      
+      if (allCellRefs.length > 0) {
+        // Fetch updated resolved names from the backend
+        const resolvedNamesResponse = await ApiService.getResolvedNames(sessionId, allCellRefs);
+        
+        // Update the tree structure without full reload
+        updateResolvedNames(resolvedNamesResponse.results);
+      }
       
     } catch (error: any) {
       setError(error.response?.data?.message || 'Error configuring sheet naming');
     }
-  }, [sessionId, cellInfo.sheet_name]);
+  }, [sessionId, cellInfo.sheet_name, dependencies, collectAllCellRefs, updateResolvedNames]);
 
   const reloadDrillDownData = useCallback(async () => {
     if (!cellInfo.can_drill_down) return;
@@ -74,13 +165,8 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
 
       setDrillDownData(data);
       
-      // Initialize nested dependencies structure
-      const nestedDeps: NestedDependencyInfo[] = data.dependencies.map(dep => ({
-        ...dep,
-        children: [],
-        expanded: false,
-        loading: false
-      }));
+      // Initialize nested dependencies structure with unique IDs
+      const nestedDeps = assignUniqueIds(data.dependencies, 'root');
       setDependencies(nestedDeps);
 
     } catch (error: any) {
@@ -171,6 +257,55 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
     }
   }, [sessionId, cellInfo.sheet_name, drillDownData, dependencies, aiGenerating, updateAINames]);
 
+  const handleDebugScreenshot = useCallback(async () => {
+    if (!drillDownData) return;
+    
+    try {
+      // Collect all cell references from current dependencies
+      const collectCellRefs = (deps: NestedDependencyInfo[]): string[] => {
+        const refs: string[] = [];
+        deps.forEach(dep => {
+          refs.push(dep.cell_reference);
+          if (dep.children && dep.children.length > 0) {
+            refs.push(...collectCellRefs(dep.children));
+          }
+        });
+        return refs;
+      };
+      
+      const allCellRefs = collectCellRefs(dependencies);
+      const cellRefsString = allCellRefs.join(',');
+      
+      const result = await ApiService.debugScreenshot(
+        sessionId,
+        cellInfo.sheet_name,
+        cellRefsString
+      );
+      
+      // Create a new window to display the screenshot
+      const newWindow = window.open('', '_blank', 'width=800,height=600');
+      if (newWindow) {
+        newWindow.document.write(`
+          <html>
+            <head><title>Debug Screenshot - ${result.sheet_name}</title></head>
+            <body style="margin: 20px; font-family: Arial, sans-serif;">
+              <h2>Debug Screenshot: ${result.sheet_name}</h2>
+              <p><strong>File saved to:</strong> ${result.file_path}</p>
+              <p><strong>Target cells:</strong> ${result.target_cells.join(', ')}</p>
+              <p><strong>Size:</strong> ${(result.size_bytes / 1024).toFixed(1)} KB</p>
+              <img src="data:image/png;base64,${result.screenshot_base64}" style="max-width: 100%; border: 1px solid #ccc;" />
+            </body>
+          </html>
+        `);
+      }
+      
+      setAiSuccess(`Screenshot saved to: ${result.file_path}`);
+      
+    } catch (error: any) {
+      setAiError(error.response?.data?.message || 'Failed to generate debug screenshot');
+    }
+  }, [sessionId, cellInfo.sheet_name, drillDownData, dependencies]);
+
   const handleStartEdit = useCallback((cellRef: string, currentName: string) => {
     setEditingCell(cellRef);
     setEditValue(currentName || '');
@@ -220,43 +355,59 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
 
   const loadInitialDrillDown = reloadDrillDownData;
 
-  const expandDependency = useCallback(async (targetCellRef: string) => {
-    // Find the dependency in our nested structure
-    const updateDependencyInTree = (deps: NestedDependencyInfo[], cellRef: string): NestedDependencyInfo[] => {
+  const expandDependency = useCallback(async (targetUniqueId: string) => {
+    // Find the dependency by unique ID in our nested structure
+    const updateDependencyInTree = (deps: NestedDependencyInfo[], uniqueId: string): NestedDependencyInfo[] => {
       return deps.map(dep => {
-        if (dep.cell_reference === cellRef) {
+        if (dep.uniqueId === uniqueId) {
           if (dep.is_leaf || !dep.can_expand) return dep;
           
           return { ...dep, loading: true };
         }
         if (dep.children.length > 0) {
-          return { ...dep, children: updateDependencyInTree(dep.children, cellRef) };
+          return { ...dep, children: updateDependencyInTree(dep.children, uniqueId) };
         }
         return dep;
       });
     };
     
+    // Find the dependency to get its cell reference
+    const findDependencyByUniqueId = (deps: NestedDependencyInfo[], uniqueId: string): NestedDependencyInfo | null => {
+      for (const dep of deps) {
+        if (dep.uniqueId === uniqueId) {
+          return dep;
+        }
+        if (dep.children.length > 0) {
+          const found = findDependencyByUniqueId(dep.children, uniqueId);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+    
+    const targetDep = findDependencyByUniqueId(dependencies, targetUniqueId);
+    if (!targetDep) {
+      console.error('Could not find dependency with unique ID:', targetUniqueId);
+      return;
+    }
+    
     // Set loading state
-    setDependencies(prev => updateDependencyInTree(prev, targetCellRef));
+    setDependencies(prev => updateDependencyInTree(prev, targetUniqueId));
     
     try {
       // Parse cell reference to get sheet and address
-      const [sheetName, cellAddress] = targetCellRef.includes('!') 
-        ? targetCellRef.split('!')
-        : [cellInfo.sheet_name, targetCellRef];
+      const [sheetName, cellAddress] = targetDep.cell_reference.includes('!') 
+        ? targetDep.cell_reference.split('!')
+        : [cellInfo.sheet_name, targetDep.cell_reference];
       
       const data = await ApiService.expandDependency(sessionId, sheetName, cellAddress);
       
       // Update the tree with expanded children
-      const updateWithChildren = (deps: NestedDependencyInfo[], cellRef: string): NestedDependencyInfo[] => {
+      const updateWithChildren = (deps: NestedDependencyInfo[], uniqueId: string): NestedDependencyInfo[] => {
         return deps.map(dep => {
-          if (dep.cell_reference === cellRef) {
-            const newChildren: NestedDependencyInfo[] = data.dependencies.map(childDep => ({
-              ...childDep,
-              children: [],
-              expanded: false,
-              loading: false
-            }));
+          if (dep.uniqueId === uniqueId) {
+            // Assign unique IDs to new children based on parent's unique ID
+            const newChildren = assignUniqueIds(data.dependencies, dep.uniqueId);
             
             return {
               ...dep,
@@ -266,52 +417,52 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
             };
           }
           if (dep.children.length > 0) {
-            return { ...dep, children: updateWithChildren(dep.children, cellRef) };
+            return { ...dep, children: updateWithChildren(dep.children, uniqueId) };
           }
           return dep;
         });
       };
       
-      setDependencies(prev => updateWithChildren(prev, targetCellRef));
+      setDependencies(prev => updateWithChildren(prev, targetUniqueId));
       
     } catch (error: any) {
       setError(error.response?.data?.message || 'Error expanding dependency');
       
       // Remove loading state on error
-      const removeLoading = (deps: NestedDependencyInfo[], cellRef: string): NestedDependencyInfo[] => {
+      const removeLoading = (deps: NestedDependencyInfo[], uniqueId: string): NestedDependencyInfo[] => {
         return deps.map(dep => {
-          if (dep.cell_reference === cellRef) {
+          if (dep.uniqueId === uniqueId) {
             return { ...dep, loading: false };
           }
           if (dep.children.length > 0) {
-            return { ...dep, children: removeLoading(dep.children, cellRef) };
+            return { ...dep, children: removeLoading(dep.children, uniqueId) };
           }
           return dep;
         });
       };
       
-      setDependencies(prev => removeLoading(prev, targetCellRef));
+      setDependencies(prev => removeLoading(prev, targetUniqueId));
     }
-  }, [sessionId, cellInfo.sheet_name]);
+  }, [sessionId, cellInfo.sheet_name, dependencies]);
 
   const toggleExpansion = useCallback((dependency: NestedDependencyInfo) => {
-    if (!dependency.expanded && dependency.can_expand) {
-      expandDependency(dependency.cell_reference);
-    } else if (dependency.expanded) {
+    if (!dependency.expanded && dependency.can_expand && dependency.uniqueId) {
+      expandDependency(dependency.uniqueId);
+    } else if (dependency.expanded && dependency.uniqueId) {
       // Collapse the dependency
-      const collapseDependency = (deps: NestedDependencyInfo[], cellRef: string): NestedDependencyInfo[] => {
+      const collapseDependency = (deps: NestedDependencyInfo[], uniqueId: string): NestedDependencyInfo[] => {
         return deps.map(dep => {
-          if (dep.cell_reference === cellRef) {
+          if (dep.uniqueId === uniqueId) {
             return { ...dep, expanded: false };
           }
           if (dep.children.length > 0) {
-            return { ...dep, children: collapseDependency(dep.children, cellRef) };
+            return { ...dep, children: collapseDependency(dep.children, uniqueId) };
           }
           return dep;
         });
       };
       
-      setDependencies(prev => collapseDependency(prev, dependency.cell_reference));
+      setDependencies(prev => collapseDependency(prev, dependency.uniqueId!));
     }
   }, [expandDependency]);
 
@@ -331,7 +482,7 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
     
     // Then render the current dependency
     rows.push(
-      <tr key={dep.cell_reference} className={`expandable-row ${levelClass}`}>
+      <tr key={dep.uniqueId || dep.cell_reference} className={`expandable-row ${levelClass}`}>
         <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200" style={indentStyle}>
           <div className="flex items-center">
             {dep.can_expand && !dep.is_leaf ? (
@@ -356,88 +507,119 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
           </div>
         </td>
         <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200">
-          {dep.resolved_name ? (
-            <div>
-              <span className="text-gray-900 font-medium">{dep.resolved_name}</span>
-              {dep.name_source && (
-                <span className="text-xs text-gray-500 ml-2">({dep.name_source})</span>
-              )}
-            </div>
-          ) : dep.row_values && dep.row_values.length > 0 ? (
-            <ColumnSelectDropdown
-              rowValues={dep.row_values}
-              onSelect={(columnLetter) => handleColumnSelect(dep.cell_reference, columnLetter)}
-              cellReference={dep.cell_reference}
-            />
-          ) : (
-            <span className="text-gray-400 text-sm">No name available</span>
-          )}
-        </td>
-        <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200">
-          {editingCell === dep.cell_reference ? (
-            <div className="flex items-center space-x-2">
-              <input
-                type="text"
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleSaveEdit(dep.cell_reference);
-                  } else if (e.key === 'Escape') {
-                    handleCancelEdit();
-                  }
-                }}
-                className="flex-1 px-2 py-1 text-sm border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                autoFocus
-              />
-              <button
-                onClick={() => handleSaveEdit(dep.cell_reference)}
-                className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
-              >
-                ✓
-              </button>
-              <button
-                onClick={handleCancelEdit}
-                className="px-2 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700"
-              >
-                ✕
-              </button>
-            </div>
-          ) : dep.ai_status === 'success' && dep.ai_name ? (
-            <div 
-              className="cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
-              onClick={() => handleStartEdit(dep.cell_reference, dep.ai_name || '')}
-              title="Click to edit"
-            >
-              <span className={`${dep.is_manually_edited ? 'text-red-600 font-medium' : 'text-gray-900'}`}>
-                {dep.ai_name}
-              </span>
-              {dep.ai_confidence && !dep.is_manually_edited && (
-                <span className="text-xs text-gray-500 ml-2">
-                  ({Math.round(dep.ai_confidence * 100)}%)
-                </span>
-              )}
-              {dep.is_manually_edited && (
-                <span className="text-xs text-red-500 ml-2">(edited)</span>
-              )}
-            </div>
-          ) : dep.ai_status === 'failed' ? (
-            <div 
-              className="cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
-              onClick={() => handleStartEdit(dep.cell_reference, '')}
-              title="Click to add name manually"
-            >
-              <span className="text-red-500 text-xs">AI generation failed</span>
-            </div>
-          ) : (
-            <div 
-              className="cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
-              onClick={() => handleStartEdit(dep.cell_reference, '')}
-              title="Click to add name manually"
-            >
-              <span className="text-gray-400 text-sm">Click to add name</span>
-            </div>
-          )}
+          {(() => {
+            const displayInfo = getDisplayName(dep);
+            
+            // Handle editing state
+            if (editingCell === dep.cell_reference) {
+              return (
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="text"
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleSaveEdit(dep.cell_reference);
+                      } else if (e.key === 'Escape') {
+                        handleCancelEdit();
+                      }
+                    }}
+                    className="flex-1 px-2 py-1 text-sm border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => handleSaveEdit(dep.cell_reference)}
+                    className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    onClick={handleCancelEdit}
+                    className="px-2 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700"
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            }
+            
+            // Manual names mode
+            if (nameDisplayMode === 'manual') {
+              if (dep.resolved_name) {
+                return (
+                  <div>
+                    <span className="text-gray-900 font-medium">{dep.resolved_name}</span>
+                    {dep.name_source && (
+                      <span className="text-xs text-gray-500 ml-2">({dep.name_source})</span>
+                    )}
+                  </div>
+                );
+              } else if (dep.row_values && dep.row_values.length > 0) {
+                return (
+                  <ColumnSelectDropdown
+                    rowValues={dep.row_values}
+                    onSelect={(columnLetter) => handleColumnSelect(dep.cell_reference, columnLetter)}
+                    cellReference={dep.cell_reference}
+                  />
+                );
+              } else {
+                return <span className="text-gray-400 text-sm">{displayInfo.name}</span>;
+              }
+            }
+            
+            // AI names mode
+            else {
+              if (displayInfo.source === 'ai' && dep.ai_name) {
+                return (
+                  <div 
+                    className="cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
+                    onClick={() => handleStartEdit(dep.cell_reference, dep.ai_name || '')}
+                    title="Click to edit AI name"
+                  >
+                    <span className={`${dep.is_manually_edited ? 'text-red-600 font-medium' : 'text-blue-600 font-medium'}`}>
+                      {dep.ai_name}
+                    </span>
+                    {dep.ai_confidence && !dep.is_manually_edited && (
+                      <span className="text-xs text-gray-500 ml-2">
+                        ({Math.round(dep.ai_confidence * 100)}%)
+                      </span>
+                    )}
+                    {dep.is_manually_edited && (
+                      <span className="text-xs text-red-500 ml-2">(edited)</span>
+                    )}
+                  </div>
+                );
+              } else if (displayInfo.source === 'manual' && dep.resolved_name) {
+                return (
+                  <div>
+                    <span className="text-gray-600 font-medium">{dep.resolved_name}</span>
+                    <span className="text-xs text-gray-500 ml-2">(manual fallback)</span>
+                  </div>
+                );
+              } else if (dep.ai_status === 'failed') {
+                return (
+                  <div 
+                    className="cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
+                    onClick={() => handleStartEdit(dep.cell_reference, '')}
+                    title="Click to add name manually"
+                  >
+                    <span className="text-red-500 text-xs">AI generation failed</span>
+                  </div>
+                );
+              } else {
+                return (
+                  <div 
+                    className="cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
+                    onClick={() => handleStartEdit(dep.cell_reference, '')}
+                    title="Click to add name manually"
+                  >
+                    <span className="text-gray-400 text-sm italic">{displayInfo.name}</span>
+                  </div>
+                );
+              }
+            }
+          })()}
         </td>
         <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200 text-right font-mono">
           {dep.value.toLocaleString()}
@@ -554,23 +736,59 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
         {/* AI Generation Button */}
         {drillDownData && drillDownData.dependencies.length > 0 && (
           <div className="mb-6">
-            <button
-              onClick={handleAIGeneration}
-              disabled={aiGenerating}
-              className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-purple-400 disabled:cursor-not-allowed transition-colors"
-            >
-              {aiGenerating ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                  Generating AI Names...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-4 h-4 mr-2" />
-                  🤖 Generate AI Names
-                </>
-              )}
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={handleAIGeneration}
+                disabled={aiGenerating}
+                className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-purple-400 disabled:cursor-not-allowed transition-colors"
+              >
+                {aiGenerating ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                    Generating AI Names...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    🤖 Generate AI Names
+                  </>
+                )}
+              </button>
+              
+              <button
+                onClick={handleDebugScreenshot}
+                className="flex items-center px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
+                title="Generate debug screenshot to see what the AI sees"
+              >
+                <Camera className="w-4 h-4 mr-1" />
+                Debug Screenshot
+              </button>
+            </div>
+            
+            {/* Name Display Mode Toggle */}
+            <div className="flex items-center gap-3 mt-4">
+              <span className="text-sm font-medium text-gray-700">Name Display:</span>
+              <div className="flex items-center gap-2">
+                <span className={`text-sm ${nameDisplayMode === 'manual' ? 'text-blue-600 font-medium' : 'text-gray-500'}`}>
+                  Manual
+                </span>
+                <button
+                  onClick={() => setNameDisplayMode(nameDisplayMode === 'manual' ? 'ai' : 'manual')}
+                  className="flex items-center p-1 rounded-full transition-colors hover:bg-gray-100"
+                  title={`Switch to ${nameDisplayMode === 'manual' ? 'AI' : 'Manual'} names`}
+                >
+                  {nameDisplayMode === 'manual' ? (
+                    <ToggleLeft className="w-6 h-6 text-gray-400" />
+                  ) : (
+                    <ToggleRight className="w-6 h-6 text-blue-600" />
+                  )}
+                </button>
+                <span className={`text-sm ${nameDisplayMode === 'ai' ? 'text-blue-600 font-medium' : 'text-gray-500'}`}>
+                  AI Generated
+                </span>
+              </div>
+            </div>
+            
             <p className="text-xs text-gray-600 mt-2">
               Generate contextual names for all visible cells using AI analysis. Only unprocessed cells will be named.
             </p>
@@ -619,8 +837,12 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
                       <thead>
                         <tr>
                           <th className="text-left">Cell Reference</th>
-                          <th className="text-left">Name</th>
-                          <th className="text-left">AI Name</th>
+                          <th className="text-left">
+                            Name 
+                            <span className="text-xs text-gray-500 ml-1">
+                              ({nameDisplayMode === 'manual' ? 'Manual' : 'AI Generated'})
+                            </span>
+                          </th>
                           <th className="text-right">Value</th>
                           <th className="text-left">Formula</th>
                           <th className="text-left">Type</th>
