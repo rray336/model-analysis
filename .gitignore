@@ -30,6 +30,9 @@ yarn-error.log*
 # File uploads (session-based temporary files)
 backend/uploads/
 
+# Temporary files
+Temporary_files/
+
 # Debug screenshots
 debug_screenshots/
 
