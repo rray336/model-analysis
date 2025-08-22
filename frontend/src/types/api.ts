@@ -49,9 +49,14 @@ export interface DependencyInfo {
   depth: number;
   children: DependencyInfo[];
   expanded: boolean;
-  resolved_name?: string;
+  resolved_name?: string;  // Computed concatenation of the three components
   name_source?: string;
   row_values?: RowValue[];
+  // New three-component naming system
+  context_name?: string;        // User-entered context text
+  row_value_name?: string;      // Selected row value
+  column_value_name?: string;   // Selected column value (was resolved_name)
+  // AI naming fields
   ai_name?: string;
   ai_confidence?: number;
   ai_status?: 'success' | 'failed';

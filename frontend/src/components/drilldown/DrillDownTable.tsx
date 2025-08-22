@@ -3,6 +3,8 @@ import { ChevronRight, ChevronDown, Calculator, AlertCircle, BarChart3, Sparkles
 import { ApiService } from '../../services/api';
 import { CellInfo, DrillDownResponse, DependencyInfo } from '../../types/api';
 import { ColumnSelectDropdown } from './ColumnSelectDropdown';
+import { RowValueDropdown } from './RowValueDropdown';
+import { ContextInput } from './ContextInput';
 
 interface DrillDownTableProps {
   sessionId: string;
@@ -36,6 +38,16 @@ const assignUniqueIds = (deps: DependencyInfo[], parentId: string = 'root'): Nes
     };
   });
 };
+
+// Utility function to extract column letter from cell reference
+const extractColumnLetter = (cellReference: string): string => {
+  // Handle sheet reference like "Sheet1!BT71" or just "BT71"
+  const cellPart = cellReference.includes('!') ? cellReference.split('!')[1] : cellReference;
+  // Extract just the column letters (e.g., "BT" from "BT71")
+  const match = cellPart.match(/^([A-Z]+)\d+$/);
+  return match ? match[1] : 'A';
+};
+
 
 export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellInfo }) => {
   const [drillDownData, setDrillDownData] = useState<DrillDownResponse | null>(null);
@@ -85,7 +97,11 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
             ...updatedDep,
             resolved_name: nameResult.resolved_name,
             name_source: nameResult.name_source,
-            row_values: nameResult.row_values
+            row_values: nameResult.row_values,
+            // Update three-component naming fields
+            context_name: nameResult.context_name,
+            row_value_name: nameResult.row_value_name,
+            column_value_name: nameResult.column_value_name
           };
         }
         
@@ -146,6 +162,49 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
       
     } catch (error: any) {
       setError(error.response?.data?.message || 'Error configuring sheet naming');
+    }
+  }, [sessionId, cellInfo.sheet_name, dependencies, collectAllCellRefs, updateResolvedNames]);
+
+  const handleContextSave = useCallback(async (cellReference: string, contextText: string) => {
+    try {
+      // Parse cell reference to get sheet name and cell address
+      const [sheetName, cellAddress] = cellReference.includes('!') 
+        ? cellReference.split('!')
+        : [cellInfo.sheet_name, cellReference];
+      
+      await ApiService.setContextName(sessionId, sheetName, cellAddress, contextText);
+      
+      // Update resolved names to reflect the change
+      const allCellRefs = collectAllCellRefs(dependencies);
+      if (allCellRefs.length > 0) {
+        const resolvedNamesResponse = await ApiService.getResolvedNames(sessionId, allCellRefs);
+        updateResolvedNames(resolvedNamesResponse.results);
+      }
+      
+    } catch (error: any) {
+      setError(error.response?.data?.message || 'Error setting context name');
+    }
+  }, [sessionId, cellInfo.sheet_name, dependencies, collectAllCellRefs, updateResolvedNames]);
+
+  const handleRowValueSelect = useCallback(async (cellReference: string, _selectedValue: string, selectedRow: number) => {
+    try {
+      // Parse cell reference to get sheet name
+      const [sheetName] = cellReference.includes('!') 
+        ? cellReference.split('!')
+        : [cellInfo.sheet_name];
+      
+      // Configure sheet-level row naming (this affects all cells in the sheet)
+      await ApiService.configureSheetRowNaming(sessionId, sheetName, selectedRow);
+      
+      // Update resolved names to reflect the change for all cells
+      const allCellRefs = collectAllCellRefs(dependencies);
+      if (allCellRefs.length > 0) {
+        const resolvedNamesResponse = await ApiService.getResolvedNames(sessionId, allCellRefs);
+        updateResolvedNames(resolvedNamesResponse.results);
+      }
+      
+    } catch (error: any) {
+      setError(error.response?.data?.message || 'Error configuring sheet row naming');
     }
   }, [sessionId, cellInfo.sheet_name, dependencies, collectAllCellRefs, updateResolvedNames]);
 
@@ -544,28 +603,59 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
               );
             }
             
-            // Manual names mode
+            // Manual names mode - Three column layout
             if (nameDisplayMode === 'manual') {
-              if (dep.resolved_name) {
-                return (
-                  <div>
-                    <span className="text-gray-900 font-medium">{dep.resolved_name}</span>
-                    {dep.name_source && (
-                      <span className="text-xs text-gray-500 ml-2">({dep.name_source})</span>
+              return (
+                <div className="flex gap-1">
+                  {/* Context Input - 1/3 width */}
+                  <div className="w-1/3">
+                    <ContextInput
+                      value={dep.context_name || ''}
+                      cellReference={dep.cell_reference}
+                      sessionId={sessionId}
+                      sheetName={cellInfo.sheet_name}
+                      onSave={handleContextSave}
+                    />
+                  </div>
+                  
+                  {/* Row Values - 1/3 width */}
+                  <div className="w-1/3">
+                    {dep.row_value_name ? (
+                      <div className="w-full px-1 py-1 text-xs bg-gray-100 border rounded" title={dep.row_value_name}>
+                        <span className="block truncate text-gray-700">{dep.row_value_name}</span>
+                      </div>
+                    ) : (
+                      <RowValueDropdown
+                        sessionId={sessionId}
+                        columnLetter={extractColumnLetter(dep.cell_reference)}
+                        sheetName={cellInfo.sheet_name}
+                        selectedValue=""
+                        cellReference={dep.cell_reference}
+                        onSelect={(selectedValue, selectedRow) => handleRowValueSelect(dep.cell_reference, selectedValue, selectedRow)}
+                      />
                     )}
                   </div>
-                );
-              } else if (dep.row_values && dep.row_values.length > 0) {
-                return (
-                  <ColumnSelectDropdown
-                    rowValues={dep.row_values}
-                    onSelect={(columnLetter) => handleColumnSelect(dep.cell_reference, columnLetter)}
-                    cellReference={dep.cell_reference}
-                  />
-                );
-              } else {
-                return <span className="text-gray-400 text-sm">{displayInfo.name}</span>;
-              }
+                  
+                  {/* Column Values Dropdown - 1/3 width */}
+                  <div className="w-1/3">
+                    {dep.column_value_name ? (
+                      <div className="w-full px-1 py-1 text-xs bg-gray-100 border rounded" title={dep.column_value_name}>
+                        <span className="block truncate text-gray-700">{dep.column_value_name}</span>
+                      </div>
+                    ) : dep.row_values && dep.row_values.length > 0 ? (
+                      <ColumnSelectDropdown
+                        rowValues={dep.row_values}
+                        onSelect={(columnLetter) => handleColumnSelect(dep.cell_reference, columnLetter)}
+                        cellReference={dep.cell_reference}
+                      />
+                    ) : (
+                      <div className="w-full px-1 py-1 text-xs bg-gray-50 border rounded text-gray-400">
+                        Column value...
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
             }
             
             // AI names mode
@@ -838,10 +928,23 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
                         <tr>
                           <th className="text-left">Cell Reference</th>
                           <th className="text-left">
-                            Name 
-                            <span className="text-xs text-gray-500 ml-1">
-                              ({nameDisplayMode === 'manual' ? 'Manual' : 'AI Generated'})
-                            </span>
+                            {nameDisplayMode === 'manual' ? (
+                              <div>
+                                Name (Manual)
+                                <div className="flex gap-1 text-xs text-gray-400 mt-1">
+                                  <span className="w-1/3">Context</span>
+                                  <span className="w-1/3">Row</span>
+                                  <span className="w-1/3">Column</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div>
+                                Name 
+                                <span className="text-xs text-gray-500 ml-1">
+                                  (AI Generated)
+                                </span>
+                              </div>
+                            )}
                           </th>
                           <th className="text-right">Value</th>
                           <th className="text-left">Formula</th>

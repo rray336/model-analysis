@@ -131,6 +131,78 @@ export class ApiService {
     return response.data;
   }
   
+  static async debugScreenshot(
+    sessionId: string,
+    sheetName: string,
+    cellRefs: string
+  ): Promise<{
+    message: string;
+    file_path: string;
+    sheet_name: string;
+    target_cells: string[];
+    screenshot_base64: string;
+    size_bytes: number;
+  }> {
+    const response = await api.get(
+      `/debug-screenshot/${sessionId}/${encodeURIComponent(sheetName)}?cell_refs=${encodeURIComponent(cellRefs)}`
+    );
+    return response.data;
+  }
+  
+  static async getResolvedNames(
+    sessionId: string,
+    cellReferences: string[]
+  ): Promise<{ results: Record<string, { 
+    resolved_name: string | null; 
+    name_source: string | null; 
+    row_values: RowValue[] | null;
+    context_name: string | null;
+    row_value_name: string | null;
+    column_value_name: string | null;
+  }> }> {
+    const response = await api.post(
+      `/get-resolved-names/${sessionId}`,
+      { cell_references: cellReferences }
+    );
+    return response.data;
+  }
+  
+  static async getColumnValues(
+    sessionId: string,
+    sheetName: string,
+    columnLetter: string,
+    rows: number = 5
+  ): Promise<{ column_values: Array<{ row: string; value: string; is_meaningful: boolean }> }> {
+    const response = await api.get(
+      `/column-values/${sessionId}/${encodeURIComponent(sheetName)}/${columnLetter}?rows=${rows}`
+    );
+    return response.data;
+  }
+  
+  static async setContextName(
+    sessionId: string,
+    sheetName: string,
+    cellAddress: string,
+    contextText: string
+  ): Promise<{ message: string; cell_reference: string; context_text: string }> {
+    const response = await api.post(
+      `/set-context-name/${sessionId}/${encodeURIComponent(sheetName)}/${cellAddress}`,
+      { context_text: contextText }
+    );
+    return response.data;
+  }
+  
+  static async configureSheetRowNaming(
+    sessionId: string,
+    sheetName: string,
+    rowNumber: number
+  ): Promise<{ message: string; sheet_name: string; row_number: number }> {
+    const response = await api.post(
+      `/configure-sheet-row-naming/${sessionId}/${encodeURIComponent(sheetName)}/${rowNumber}`
+    );
+    return response.data;
+  }
+  
   static async healthCheck(): Promise<{ status: string; service: string }> {
     const response = await api.get('/health');
     return response.data;

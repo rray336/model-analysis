@@ -35,7 +35,9 @@ from backend.app.models.analysis import (
     RowValue,
     AIBatchResult,
     AIBatchRequest,
-    AINameResult
+    AINameResult,
+    ContextNameRequest,
+    RowValueNameRequest
 )
 from backend.app.services.formula_analyzer import FormulaAnalyzer
 from backend.app.services.ai_naming_service import AINameService
@@ -44,6 +46,7 @@ from backend.app.utils.excel_utils import (
     get_cell_value_and_formula, 
     validate_cell_address,
     get_row_values,
+    get_column_values,
     get_cell_name_from_column,
     parse_cell_address
 )
@@ -82,11 +85,17 @@ sessions: dict = {}
 # Store naming configurations per session: {session_id: {sheet_name: column_letter}}
 naming_configs: dict = {}
 
+# Store row naming configurations per session: {session_id: {sheet_name: row_number}}
+row_naming_configs: dict = {}
+
 # Store AI processed cells per session: {session_id: {sheet_name: {cell_ref: ai_result}}}
 ai_processed_cells: dict = {}
 
 # Store manually edited AI names per session: {session_id: {sheet_name: {cell_ref: manual_name}}}
 manual_ai_edits: dict = {}
+
+# Store context names per session: {session_id: {sheet_name: {cell_ref: context_text}}}
+context_names: dict = {}
 
 
 def cleanup_uploads_directory():
@@ -555,6 +564,61 @@ async def get_row_values_endpoint(session_id: str, sheet_name: str, row_number: 
         logger.error(f"Error getting row values for {sheet_name}!{row_number}: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting row values: {str(e)}")
 
+@app.get("/api/column-values/{session_id}/{sheet_name}/{column_letter}")
+async def get_column_values_endpoint(session_id: str, sheet_name: str, column_letter: str, rows: int = 5):
+    """Get values from a specific column for row value selection dropdown"""
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session_data = sessions[session_id]
+    file_path = session_data["file_path"]
+    
+    # Validate sheet name
+    if sheet_name not in session_data["sheets"]:
+        raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name}' not found")
+    
+    try:
+        column_values = get_column_values(file_path, sheet_name, column_letter, rows)
+        return {"column_values": column_values}
+        
+    except Exception as e:
+        logger.error(f"Error getting column values for {sheet_name}!{column_letter}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting column values: {str(e)}")
+
+@app.post("/api/set-context-name/{session_id}/{sheet_name}/{cell_address}")
+async def set_context_name(session_id: str, sheet_name: str, cell_address: str, request: ContextNameRequest):
+    """Set context name for a specific cell"""
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session_data = sessions[session_id]
+    
+    # Validate sheet name
+    if sheet_name not in session_data["sheets"]:
+        raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name}' not found")
+    
+    try:
+        # Initialize nested dictionaries if needed
+        if session_id not in context_names:
+            context_names[session_id] = {}
+        if sheet_name not in context_names[session_id]:
+            context_names[session_id][sheet_name] = {}
+        
+        # Store the context name
+        cell_ref = f"{sheet_name}!{cell_address}"
+        context_names[session_id][sheet_name][cell_ref] = request.context_text
+        
+        return {"message": "Context name set successfully", "cell_reference": cell_ref, "context_text": request.context_text}
+        
+    except Exception as e:
+        logger.error(f"Error setting context name for {cell_ref}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error setting context name: {str(e)}")
+
+
 @app.post("/api/configure-sheet-naming/{session_id}/{sheet_name}/{column_letter}")
 async def configure_sheet_naming(session_id: str, sheet_name: str, column_letter: str):
     """Configure which column to use for naming cells in a specific sheet"""
@@ -595,9 +659,57 @@ async def get_naming_config(session_id: str):
     config = naming_configs.get(session_id, {})
     return {"naming_config": config}
 
+@app.post("/api/configure-sheet-row-naming/{session_id}/{sheet_name}/{row_number}")
+async def configure_sheet_row_naming(session_id: str, sheet_name: str, row_number: int):
+    """Configure which row to use for naming cells in a specific sheet"""
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session_data = sessions[session_id]
+    
+    # Validate sheet name
+    if sheet_name not in session_data["sheets"]:
+        raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name}' not found")
+    
+    # Validate row number
+    if row_number < 1:
+        raise HTTPException(status_code=400, detail="Row number must be greater than 0")
+    
+    try:
+        # Initialize session in row_naming_configs if it doesn't exist
+        if session_id not in row_naming_configs:
+            row_naming_configs[session_id] = {}
+        
+        # Set the row configuration for this sheet
+        row_naming_configs[session_id][sheet_name] = row_number
+        
+        return {
+            "message": f"Row naming configured for sheet '{sheet_name}'",
+            "session_id": session_id,
+            "sheet_name": sheet_name,
+            "row": row_number
+        }
+        
+    except Exception as e:
+        logger.error(f"Error configuring row naming for {sheet_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error configuring row naming: {str(e)}")
+
+@app.get("/api/row-naming-config/{session_id}")
+async def get_row_naming_config(session_id: str):
+    """Get current row naming configuration for a session"""
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    config = row_naming_configs.get(session_id, {})
+    return {"row_naming_config": config}
+
 @app.post("/api/get-resolved-names/{session_id}")
 async def get_resolved_names(session_id: str, request_body: dict):
-    """Get resolved names for a batch of cell references"""
+    """Get resolved names for a batch of cell references with three-component naming system"""
     
     cell_references = request_body.get("cell_references", [])
     
@@ -611,25 +723,55 @@ async def get_resolved_names(session_id: str, request_body: dict):
         results = {}
         
         for cell_ref in cell_references:
-            resolved_name = None
+            context_name = None
+            row_value_name = None  
+            column_value_name = None
             name_source = None
             row_values_data = None
             
-            # Check if this dependency has a configured naming column
+            # Get context name if exists
+            if session_id in context_names and '!' in cell_ref:
+                dep_sheet, _ = cell_ref.split('!', 1)
+                if dep_sheet in context_names[session_id] and cell_ref in context_names[session_id][dep_sheet]:
+                    context_name = context_names[session_id][dep_sheet][cell_ref]
+            
+            # Get row value name using sheet-level row configuration
+            if session_id in row_naming_configs and '!' in cell_ref:
+                dep_sheet, dep_cell = cell_ref.split('!', 1)
+                try:
+                    column_letter, _ = parse_cell_address(dep_cell)
+                    if dep_sheet in row_naming_configs[session_id]:
+                        configured_row = row_naming_configs[session_id][dep_sheet]
+                        row_value_name = get_cell_name_from_column(session_data["file_path"], dep_sheet, configured_row, column_letter)
+                except:
+                    pass
+            
+            # Get column value name (existing naming system)
             if session_id in naming_configs and '!' in cell_ref:
                 dep_sheet, dep_cell = cell_ref.split('!', 1)
                 try:
                     _, row_num = parse_cell_address(dep_cell)
                     if dep_sheet in naming_configs[session_id]:
                         column_letter = naming_configs[session_id][dep_sheet]
-                        resolved_name = get_cell_name_from_column(session_data["file_path"], dep_sheet, row_num, column_letter)
-                        if resolved_name:
+                        column_value_name = get_cell_name_from_column(session_data["file_path"], dep_sheet, row_num, column_letter)
+                        if column_value_name:
                             name_source = f"Column {column_letter}"
                 except:
                     pass
             
-            # If no resolved name, get row values for dropdown
-            if not resolved_name and '!' in cell_ref:
+            # Compute final resolved name by concatenating non-empty components
+            resolved_parts = []
+            if context_name and context_name.strip():
+                resolved_parts.append(context_name.strip())
+            if row_value_name and row_value_name.strip():
+                resolved_parts.append(row_value_name.strip())
+            if column_value_name and column_value_name.strip():
+                resolved_parts.append(column_value_name.strip())
+            
+            resolved_name = " ".join(resolved_parts) if resolved_parts else None
+            
+            # Get row values for dropdown only if no configurations exist (neither column nor row)
+            if not column_value_name and not row_value_name and '!' in cell_ref:
                 dep_sheet, dep_cell = cell_ref.split('!', 1)
                 try:
                     _, row_num = parse_cell_address(dep_cell)
@@ -639,7 +781,10 @@ async def get_resolved_names(session_id: str, request_body: dict):
                     pass
             
             results[cell_ref] = {
-                "resolved_name": resolved_name,
+                "context_name": context_name,
+                "row_value_name": row_value_name,
+                "column_value_name": column_value_name,
+                "resolved_name": resolved_name,  # Computed concatenation
                 "name_source": name_source,
                 "row_values": row_values_data
             }

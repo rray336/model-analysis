@@ -240,6 +240,57 @@ def get_row_values(workbook_path: Path, sheet_name: str, row_number: int, max_co
             except Exception:
                 pass
 
+def get_column_values(workbook_path: Path, sheet_name: str, column_letter: str, max_rows: int = 5) -> List[Dict[str, Any]]:
+    """Get values from a specific column for row value selection dropdown"""
+    wb = None
+    try:
+        wb = openpyxl.load_workbook(workbook_path, data_only=True)
+        
+        if sheet_name not in wb.sheetnames:
+            logger.warning(f"Sheet '{sheet_name}' not found in workbook")
+            return []
+        
+        sheet = wb[sheet_name]
+        column_values = []
+        
+        # Convert column letter to index
+        try:
+            col_index = column_index_from_string(column_letter)
+        except ValueError:
+            logger.error(f"Invalid column letter: {column_letter}")
+            return []
+        
+        for row in range(1, min(max_rows + 1, sheet.max_row + 1)):
+            cell = sheet.cell(row=row, column=col_index)
+            
+            # Convert value to string for display
+            display_value = ""
+            if cell.value is not None:
+                if isinstance(cell.value, (int, float)):
+                    display_value = str(cell.value)
+                elif isinstance(cell.value, datetime):
+                    display_value = cell.value.strftime("%Y-%m-%d")
+                else:
+                    display_value = str(cell.value)
+            
+            column_values.append({
+                "row": str(row),
+                "value": display_value,
+                "is_meaningful": len(display_value.strip()) > 0 and not display_value.isdigit()
+            })
+        
+        return column_values
+        
+    except Exception as e:
+        logger.error(f"Error getting column values for {sheet_name}!{column_letter}: {e}")
+        return []
+    finally:
+        if wb:
+            try:
+                wb.close()
+            except Exception:
+                pass
+
 def get_cell_name_from_column(workbook_path: Path, sheet_name: str, row_number: int, column_letter: str) -> Optional[str]:
     """Get the name value from a specific column of a row"""
     wb = None

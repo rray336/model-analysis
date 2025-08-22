@@ -39,9 +39,14 @@ class DependencyInfo(BaseModel):
     depth: int = 1
     children: List['DependencyInfo'] = []
     expanded: bool = False
-    resolved_name: Optional[str] = None
+    resolved_name: Optional[str] = None  # Computed concatenation of the three components
     name_source: Optional[str] = None
     row_values: Optional[List[RowValue]] = None
+    # New three-component naming system
+    context_name: Optional[str] = None        # User-entered context text
+    row_value_name: Optional[str] = None      # Selected row value
+    column_value_name: Optional[str] = None   # Selected column value (was resolved_name)
+    # AI naming fields
     ai_name: Optional[str] = None
     ai_confidence: Optional[float] = None
     ai_status: Optional[str] = None
@@ -82,6 +87,15 @@ class AIBatchRequest(BaseModel):
     sheet_name: str
     unprocessed_cells: List[str]
     use_extended_context: Optional[bool] = True  # Default to new behavior
+
+class ContextNameRequest(BaseModel):
+    """Request for setting context name"""
+    context_text: str
+
+class RowValueNameRequest(BaseModel):
+    """Request for setting row value name"""
+    selected_value: str
+    selected_row: int
 
 class ErrorResponse(BaseModel):
     """Error response model"""

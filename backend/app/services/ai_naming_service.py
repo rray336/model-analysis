@@ -42,7 +42,7 @@ class AIExcelScreenshotGenerator:
         
     def generate_context_screenshot(self, sheet_name: str, target_cells: List[str], 
                                   context_rows: int = 12, use_extended_context: bool = True) -> bytes:
-        """Generate a screenshot showing context columns A-E around target cell rows"""
+        """Generate a screenshot showing focused columns: A-E plus target cell columns only"""
         try:
             # Debug: Log the sheet name being requested
             logger.info(f"Generating screenshot for sheet: '{sheet_name}'")
@@ -60,24 +60,32 @@ class AIExcelScreenshotGenerator:
                 logger.error(f"Error reading Excel file for sheet '{sheet_name}': {e}")
                 raise
             
-            # Get row and column range from target cells
-            min_row, max_row, min_col, max_col = self._get_bounding_box(target_cells)
+            # Get row range and target columns from target cells
+            min_row, max_row, target_columns = self._get_focused_range(target_cells)
             
             if use_extended_context:
-                # Extended context: A to target column, row 1 to target row
+                # Extended context: Focused columns (A-E + target columns), row 1 to target row
                 start_row = 0  # Always start from row 1
                 end_row = max_row + 1  # Include up to the target cell row
-                start_col = 0  # Always start from column A
-                end_col = max_col + 1  # Include up to the rightmost target cell column
+                
+                # Select focused columns: A-E (0-4) + unique target columns
+                context_columns = [0, 1, 2, 3, 4]  # A-E
+                selected_columns = context_columns + [col for col in target_columns if col not in context_columns]
+                
+                # Ensure we don't exceed DataFrame bounds
+                selected_columns = [col for col in selected_columns if col < len(df.columns)]
+                selected_columns.sort()  # Keep in order for readability
+                
+                logger.info(f"Using focused columns: {[self._get_column_letter(col + 1) for col in selected_columns]}")
+                
             else:
                 # Legacy context: limited rows and columns A-E only
                 start_row = max(0, min_row - context_rows // 2)
                 end_row = min(len(df), max_row + context_rows // 2)
-                start_col = 0
-                end_col = min(5, len(df.columns))  # Columns A-E (indices 0-4)
+                selected_columns = list(range(min(5, len(df.columns))))  # Columns A-E (indices 0-4)
             
-            # Extract subset
-            subset_df = df.iloc[start_row:end_row, start_col:end_col].copy()
+            # Extract subset using selected columns
+            subset_df = df.iloc[start_row:end_row, selected_columns].copy()
             
             # Create figure
             fig, ax = plt.subplots(figsize=(14, 10))
@@ -89,8 +97,11 @@ class AIExcelScreenshotGenerator:
             for i, row in subset_df.iterrows():
                 table_data.append([str(val) if pd.notna(val) else '' for val in row])
             
-            # Add column headers (A, B, C, etc.)
-            col_headers = [get_column_letter(start_col + i + 1) for i in range(len(subset_df.columns))]
+            # Add column headers based on actual selected columns
+            if use_extended_context:
+                col_headers = [self._get_column_letter(col + 1) for col in selected_columns]
+            else:
+                col_headers = [get_column_letter(i + 1) for i in range(len(subset_df.columns))]
             
             # Add row numbers
             row_headers = [str(start_row + i + 1) for i in range(len(subset_df))]
@@ -110,8 +121,8 @@ class AIExcelScreenshotGenerator:
             
             # Add title
             if use_extended_context:
-                col_range = f'A-{get_column_letter(end_col)}'
-                plt.title(f'Sheet: {sheet_name} - Extended Context Columns {col_range} for AI Analysis', 
+                col_range = f'A-E + {", ".join([self._get_column_letter(col + 1) for col in target_columns])}'
+                plt.title(f'Sheet: {sheet_name} - Focused Context ({col_range}) for AI Analysis', 
                          fontsize=14, fontweight='bold', pad=20)
             else:
                 plt.title(f'Sheet: {sheet_name} - Context Columns A-E for AI Analysis', 
@@ -141,8 +152,8 @@ class AIExcelScreenshotGenerator:
             plt.close(fig)
             return screenshot_bytes
     
-    def _get_bounding_box(self, cell_addresses: List[str]) -> Tuple[int, int, int, int]:
-        """Get bounding box (min_row, max_row, min_col, max_col) for cell addresses"""
+    def _get_focused_range(self, cell_addresses: List[str]) -> Tuple[int, int, List[int]]:
+        """Get focused range (min_row, max_row, unique_target_columns) for cell addresses"""
         rows, cols = [], []
         
         for cell_addr in cell_addresses:
@@ -156,9 +167,11 @@ class AIExcelScreenshotGenerator:
                 continue
         
         if not rows or not cols:
-            return 0, 10, 0, 8  # Default range
+            return 0, 10, [0, 1, 2, 3, 4]  # Default: A-E columns
         
-        return min(rows), max(rows), min(cols), max(cols)
+        # Return unique target columns (sorted, no duplicates)
+        unique_target_cols = sorted(list(set(cols)))
+        return min(rows), max(rows), unique_target_cols
     
     def _parse_cell_address(self, cell_address: str) -> Tuple[str, int]:
         """Parse cell address into column letter and row number"""
@@ -171,6 +184,11 @@ class AIExcelScreenshotGenerator:
             raise ValueError(f"Invalid cell address: {cell_address}")
         
         return match.groups()[0], int(match.groups()[1])
+    
+    def _get_column_letter(self, col_num: int) -> str:
+        """Convert column number to letter (1=A, 2=B, etc.)"""
+        from openpyxl.utils import get_column_letter
+        return get_column_letter(col_num)
 
 class AINameService:
     """Service for AI-powered contextual cell naming using Gemini"""
@@ -338,7 +356,7 @@ class AINameService:
         
         if use_extended_context:
             prompt = f"""You are analyzing the '{sheet_name}' worksheet of a financial Excel model. 
-The screenshot shows the full range from column A to the target cell columns and all rows from 1 to the target cell rows.
+The screenshot shows focused columns: A-E (for context) plus the specific target cell columns, and all rows from 1 to the target cell rows.
 
 Your task is to create period-aware descriptive names for the following cells using a two-step lookup process:
 
