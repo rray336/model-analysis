@@ -81,6 +81,7 @@ class AIBatchRequest(BaseModel):
     session_id: str
     sheet_name: str
     unprocessed_cells: List[str]
+    use_extended_context: Optional[bool] = True  # Default to new behavior
 
 class ErrorResponse(BaseModel):
     """Error response model"""

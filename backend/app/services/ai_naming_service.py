@@ -41,7 +41,7 @@ class AIExcelScreenshotGenerator:
         self.workbook_path = workbook_path
         
     def generate_context_screenshot(self, sheet_name: str, target_cells: List[str], 
-                                  context_rows: int = 12) -> bytes:
+                                  context_rows: int = 12, use_extended_context: bool = True) -> bytes:
         """Generate a screenshot showing context columns A-E around target cell rows"""
         try:
             # Debug: Log the sheet name being requested
@@ -60,16 +60,21 @@ class AIExcelScreenshotGenerator:
                 logger.error(f"Error reading Excel file for sheet '{sheet_name}': {e}")
                 raise
             
-            # Get row range from target cells
-            min_row, max_row, _, _ = self._get_bounding_box(target_cells)
+            # Get row and column range from target cells
+            min_row, max_row, min_col, max_col = self._get_bounding_box(target_cells)
             
-            # Expand row context around target cells
-            start_row = max(0, min_row - context_rows // 2)
-            end_row = min(len(df), max_row + context_rows // 2)
-            
-            # Always use columns A-E (0-4) for context
-            start_col = 0
-            end_col = min(5, len(df.columns))  # Columns A-E (indices 0-4)
+            if use_extended_context:
+                # Extended context: A to target column, row 1 to target row
+                start_row = 0  # Always start from row 1
+                end_row = max_row + 1  # Include up to the target cell row
+                start_col = 0  # Always start from column A
+                end_col = max_col + 1  # Include up to the rightmost target cell column
+            else:
+                # Legacy context: limited rows and columns A-E only
+                start_row = max(0, min_row - context_rows // 2)
+                end_row = min(len(df), max_row + context_rows // 2)
+                start_col = 0
+                end_col = min(5, len(df.columns))  # Columns A-E (indices 0-4)
             
             # Extract subset
             subset_df = df.iloc[start_row:end_row, start_col:end_col].copy()
@@ -104,8 +109,13 @@ class AIExcelScreenshotGenerator:
             table.scale(1, 1.5)
             
             # Add title
-            plt.title(f'Sheet: {sheet_name} - Context Columns A-E for AI Analysis', 
-                     fontsize=14, fontweight='bold', pad=20)
+            if use_extended_context:
+                col_range = f'A-{get_column_letter(end_col)}'
+                plt.title(f'Sheet: {sheet_name} - Extended Context Columns {col_range} for AI Analysis', 
+                         fontsize=14, fontweight='bold', pad=20)
+            else:
+                plt.title(f'Sheet: {sheet_name} - Context Columns A-E for AI Analysis', 
+                         fontsize=14, fontweight='bold', pad=20)
             
             # Save to bytes
             buffer = io.BytesIO()
@@ -195,7 +205,7 @@ class AINameService:
     
     async def generate_batch_names(self, workbook_path: Path, sheet_name: str, 
                                  cell_references: List[str], 
-                                 structured_data: Dict = None) -> AIBatchResult:
+                                 structured_data: Dict = None, use_extended_context: bool = True) -> AIBatchResult:
         """Generate AI names for a batch of cells using sheet-based processing"""
         if not self.model:
             # API key not configured
@@ -213,10 +223,10 @@ class AINameService:
         sheet_groups = self.group_cells_by_sheet(cell_references)
         
         # Process each sheet separately
-        return await self.generate_batch_names_by_sheet(workbook_path, sheet_groups)
+        return await self.generate_batch_names_by_sheet(workbook_path, sheet_groups, use_extended_context)
     
     async def generate_batch_names_by_sheet(self, workbook_path: Path, 
-                                          sheet_groups: Dict[str, List[str]]) -> AIBatchResult:
+                                          sheet_groups: Dict[str, List[str]], use_extended_context: bool = True) -> AIBatchResult:
         """Generate AI names by processing each sheet separately"""
         combined_result = AIBatchResult()
         
@@ -226,10 +236,10 @@ class AINameService:
             try:
                 # Generate screenshot for THIS sheet
                 screenshot_gen = AIExcelScreenshotGenerator(workbook_path)
-                screenshot_bytes = screenshot_gen.generate_context_screenshot(sheet_name, cell_refs)
+                screenshot_bytes = screenshot_gen.generate_context_screenshot(sheet_name, cell_refs, use_extended_context=use_extended_context)
                 
                 # Create sheet-specific prompt with line numbers
-                prompt = self._create_sheet_specific_prompt(sheet_name, cell_refs)
+                prompt = self._create_sheet_specific_prompt(sheet_name, cell_refs, use_extended_context)
                 
                 # Process this sheet's cells
                 sheet_result = await self._process_single_sheet(prompt, screenshot_bytes, cell_refs)
@@ -299,7 +309,7 @@ class AINameService:
         
         return result
     
-    def _create_sheet_specific_prompt(self, sheet_name: str, cell_references: List[str]) -> str:
+    def _create_sheet_specific_prompt(self, sheet_name: str, cell_references: List[str], use_extended_context: bool = True) -> str:
         """Create sheet-specific prompt focused on relevant line numbers"""
         
         # Extract row numbers for cells that belong to THIS sheet only
@@ -326,7 +336,57 @@ class AINameService:
         
         line_list = '\n'.join(line_instructions) if line_instructions else "- No valid cells found for this sheet"
         
-        prompt = f"""You are analyzing the '{sheet_name}' worksheet of a financial Excel model. 
+        if use_extended_context:
+            prompt = f"""You are analyzing the '{sheet_name}' worksheet of a financial Excel model. 
+The screenshot shows the full range from column A to the target cell columns and all rows from 1 to the target cell rows.
+
+Your task is to create period-aware descriptive names for the following cells using a two-step lookup process:
+
+{line_list}
+
+NAMING PROCESS - Follow these steps for EACH cell:
+
+Step 1 - PERIOD EXTRACTION:
+- For PERIOD information: Look ONLY at the first 10 rows of the specific column containing the target cell
+- Example: For a target cell in column X row Y, examine only column X rows 1-10 for period indicators
+- Ignore period information from other columns - focus solely on the target cell's column header area
+- Look for: years (2024, 2025), quarters (Q1, Q2, 1Q, 2Q), months (Jan, Feb), fiscal years (FY24), etc.
+
+Step 2 - DESCRIPTION EXTRACTION:
+- For DESCRIPTION information: Look at the first 5 columns (A-E typically) of the target cell's row for descriptive text
+- Example: For a target cell in column X row Y, examine columns A-E of row Y for business context
+- Use this row context to determine what the line item represents
+- Look for: Revenue, EBITDA, Operating Income, Expenses, etc.
+
+Step 3 - COMBINE:
+- Combine as "[Period] [Description]" using the most specific period available
+- Example: "2025 Revenue", "Q1 Operating Expenses", "Jan 2024 EBITDA"
+- If no clear period is found in the target column, use description only
+
+Requirements:
+- Maximum 75 characters per name
+- Use the most specific period available (e.g., "2Q25" instead of just "Q2" or "2025")
+- Follow financial modeling conventions
+- Process each cell individually using the two-step lookup above
+
+CRITICAL - NO HALLUCINATION: Only use information that is explicitly visible in the screenshot.
+Do NOT make assumptions about what the data should contain based on context clues or common business patterns.
+If you cannot clearly see descriptive text in the row's first 5 columns, use generic terms like "Line Item", "Revenue Item", or "Segment Item".
+Base your names ONLY on text that is actually readable in the screenshot - never infer or assume content.
+
+Return your response as a JSON object with a single key, "cell_names", where the value is another object mapping cell references to their suggested name and confidence score.
+For example:
+{{
+  "cell_names": {{
+    "Sheet1!A1": {{'name': "2025 Revenue", 'confidence': 0.95}},
+    "Sheet1!B5": {{'name': "Q1 Operating Expenses", 'confidence': 0.80}},
+    "Sheet1!C10": {{'name': "Line Item", 'confidence': 0.60}}
+  }}
+}}
+"""
+        else:
+            # Legacy prompt (original behavior)
+            prompt = f"""You are analyzing the '{sheet_name}' worksheet of a financial Excel model. 
 The screenshot shows columns A-E of this sheet.
 
 Your task is to create descriptive names for the following cells by analyzing their row context in the screenshot:

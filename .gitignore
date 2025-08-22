@@ -30,6 +30,9 @@ yarn-error.log*
 # File uploads (session-based temporary files)
 backend/uploads/
 
+# Debug screenshots
+debug_screenshots/
+
 # IDE
 .vscode/
 .idea/

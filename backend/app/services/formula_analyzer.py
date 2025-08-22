@@ -169,7 +169,7 @@ class FormulaAnalyzer:
                 
         return None
     
-    def build_dependency_tree(self, workbook_path: Path, sheet_name: str, cell_address: str, max_depth: int = 5) -> Optional[FormulaComponent]:
+    def build_dependency_tree(self, workbook_path: Path, sheet_name: str, cell_address: str, max_depth: int = 10) -> Optional[FormulaComponent]:
         """Build a dependency tree for a specific cell"""
         wb = None
         wb_data = None

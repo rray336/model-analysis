@@ -694,7 +694,7 @@ async def generate_ai_names(session_id: str, sheet_name: str, request: AIBatchRe
         
         # Call AI service with corrected sheet name
         batch_result = await ai_naming_service.generate_batch_names(
-            file_path, final_sheet_name, unprocessed_cells
+            file_path, final_sheet_name, unprocessed_cells, use_extended_context=request.use_extended_context
         )
         
         # Store results in session (now handling multi-sheet results)
