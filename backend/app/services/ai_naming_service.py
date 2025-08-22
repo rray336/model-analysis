@@ -41,20 +41,35 @@ class AIExcelScreenshotGenerator:
         self.workbook_path = workbook_path
         
     def generate_context_screenshot(self, sheet_name: str, target_cells: List[str], 
-                                  context_rows: int = 12, context_cols: int = 8) -> bytes:
-        """Generate a screenshot showing context around target cells"""
+                                  context_rows: int = 12) -> bytes:
+        """Generate a screenshot showing context columns A-E around target cell rows"""
         try:
-            # Read Excel data
-            df = pd.read_excel(self.workbook_path, sheet_name=sheet_name, header=None)
+            # Debug: Log the sheet name being requested
+            logger.info(f"Generating screenshot for sheet: '{sheet_name}'")
             
-            # Calculate bounding box for all target cells
-            min_row, max_row, min_col, max_col = self._get_bounding_box(target_cells)
+            # Read Excel data with explicit sheet validation
+            try:
+                df = pd.read_excel(self.workbook_path, sheet_name=sheet_name, header=None)
+                logger.info(f"Successfully loaded sheet '{sheet_name}' with {len(df)} rows and {len(df.columns)} columns")
+            except ValueError as e:
+                # Sheet name doesn't exist, log available sheets
+                available_sheets = pd.ExcelFile(self.workbook_path).sheet_names
+                logger.error(f"Sheet '{sheet_name}' not found. Available sheets: {available_sheets}")
+                raise ValueError(f"Sheet '{sheet_name}' not found in workbook. Available sheets: {available_sheets}")
+            except Exception as e:
+                logger.error(f"Error reading Excel file for sheet '{sheet_name}': {e}")
+                raise
             
-            # Expand context
+            # Get row range from target cells
+            min_row, max_row, _, _ = self._get_bounding_box(target_cells)
+            
+            # Expand row context around target cells
             start_row = max(0, min_row - context_rows // 2)
             end_row = min(len(df), max_row + context_rows // 2)
-            start_col = max(0, min_col - context_cols // 2)
-            end_col = min(len(df.columns), max_col + context_cols // 2)
+            
+            # Always use columns A-E (0-4) for context
+            start_col = 0
+            end_col = min(5, len(df.columns))  # Columns A-E (indices 0-4)
             
             # Extract subset
             subset_df = df.iloc[start_row:end_row, start_col:end_col].copy()
@@ -88,29 +103,8 @@ class AIExcelScreenshotGenerator:
             table.set_fontsize(9)
             table.scale(1, 1.5)
             
-            # Highlight target cells
-            for target_cell in target_cells:
-                try:
-                    col_letter, row_num = self._parse_cell_address(target_cell)
-                    col_idx = column_index_from_string(col_letter) - 1
-                    row_idx = row_num - 1
-                    
-                    # Check if cell is in visible range
-                    if (start_row <= row_idx < end_row and start_col <= col_idx < end_col):
-                        # Calculate table position
-                        table_row = row_idx - start_row + 1  # +1 for header
-                        table_col = col_idx - start_col + 1  # +1 for row labels
-                        
-                        # Highlight cell
-                        cell = table[(table_row, table_col)]
-                        cell.set_facecolor('#FF6B6B')  # Red highlight
-                        cell.set_edgecolor('#FF0000')
-                        cell.set_linewidth(2)
-                except Exception as e:
-                    logger.warning(f"Could not highlight cell {target_cell}: {e}")
-            
             # Add title
-            plt.title(f'Sheet: {sheet_name} - Context for AI Analysis', 
+            plt.title(f'Sheet: {sheet_name} - Context Columns A-E for AI Analysis', 
                      fontsize=14, fontweight='bold', pad=20)
             
             # Save to bytes
@@ -180,14 +174,32 @@ class AINameService:
             logger.warning("GEMINI_API_KEY not found. AI naming will be disabled.")
             self.model = None
     
+    def group_cells_by_sheet(self, cell_references: List[str]) -> Dict[str, List[str]]:
+        """Group cell references by sheet name"""
+        sheet_groups = {}
+        
+        for cell_ref in cell_references:
+            if '!' in cell_ref:
+                sheet_name, cell_addr = cell_ref.split('!', 1)
+                if sheet_name not in sheet_groups:
+                    sheet_groups[sheet_name] = []
+                sheet_groups[sheet_name].append(cell_ref)
+            else:
+                # Default sheet if no sheet specified (shouldn't happen in this app)
+                if 'default' not in sheet_groups:
+                    sheet_groups['default'] = []
+                sheet_groups['default'].append(cell_ref)
+        
+        logger.info(f"Grouped cells by sheet: {dict((k, len(v)) for k, v in sheet_groups.items())}")
+        return sheet_groups
+    
     async def generate_batch_names(self, workbook_path: Path, sheet_name: str, 
                                  cell_references: List[str], 
                                  structured_data: Dict = None) -> AIBatchResult:
-        """Generate AI names for a batch of cells"""
-        result = AIBatchResult()
-        
+        """Generate AI names for a batch of cells using sheet-based processing"""
         if not self.model:
             # API key not configured
+            result = AIBatchResult()
             for cell_ref in cell_references:
                 result.results[cell_ref] = AINameResult(
                     cell_reference=cell_ref,
@@ -197,14 +209,64 @@ class AINameService:
                 result.failed_cells.append(cell_ref)
             return result
         
+        # Group cells by sheet for proper processing
+        sheet_groups = self.group_cells_by_sheet(cell_references)
+        
+        # Process each sheet separately
+        return await self.generate_batch_names_by_sheet(workbook_path, sheet_groups)
+    
+    async def generate_batch_names_by_sheet(self, workbook_path: Path, 
+                                          sheet_groups: Dict[str, List[str]]) -> AIBatchResult:
+        """Generate AI names by processing each sheet separately"""
+        combined_result = AIBatchResult()
+        
+        for sheet_name, cell_refs in sheet_groups.items():
+            logger.info(f"Processing {len(cell_refs)} cells from sheet '{sheet_name}'")
+            
+            try:
+                # Generate screenshot for THIS sheet
+                screenshot_gen = AIExcelScreenshotGenerator(workbook_path)
+                screenshot_bytes = screenshot_gen.generate_context_screenshot(sheet_name, cell_refs)
+                
+                # Create sheet-specific prompt with line numbers
+                prompt = self._create_sheet_specific_prompt(sheet_name, cell_refs)
+                
+                # Process this sheet's cells
+                sheet_result = await self._process_single_sheet(prompt, screenshot_bytes, cell_refs)
+                
+                # Merge results
+                combined_result.results.update(sheet_result.results)
+                combined_result.failed_cells.extend(sheet_result.failed_cells)
+                
+            except Exception as e:
+                logger.error(f"Error processing sheet '{sheet_name}': {e}")
+                # Mark all cells in this sheet as failed
+                for cell_ref in cell_refs:
+                    combined_result.results[cell_ref] = AINameResult(
+                        cell_reference=cell_ref,
+                        status="failed",
+                        error_message=f"Sheet processing failed: {str(e)}"
+                    )
+                    combined_result.failed_cells.append(cell_ref)
+        
+        # Update combined statistics
+        total_cells = sum(len(cells) for cells in sheet_groups.values())
+        successful = len([r for r in combined_result.results.values() if r.status == "success"])
+        combined_result.processing_stats = {
+            "total_cells": total_cells,
+            "successful": successful,
+            "failed": total_cells - successful,
+            "sheets_processed": len(sheet_groups)
+        }
+        
+        return combined_result
+    
+    async def _process_single_sheet(self, prompt: str, screenshot_bytes: bytes, 
+                                  cell_references: List[str]) -> AIBatchResult:
+        """Process a single sheet's cells with AI"""
+        result = AIBatchResult()
+        
         try:
-            # Generate screenshot
-            screenshot_gen = AIExcelScreenshotGenerator(workbook_path)
-            screenshot_bytes = screenshot_gen.generate_context_screenshot(sheet_name, cell_references)
-            
-            # Prepare prompt
-            prompt = self._create_batch_prompt(sheet_name, cell_references, structured_data)
-            
             # Convert screenshot to base64 for Gemini
             screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
             
@@ -225,7 +287,7 @@ class AINameService:
                 raise Exception("No response from Gemini API")
                 
         except Exception as e:
-            logger.error(f"Error in batch AI naming: {e}")
+            logger.error(f"Error in single sheet AI processing: {e}")
             # Mark all cells as failed
             for cell_ref in cell_references:
                 result.results[cell_ref] = AINameResult(
@@ -235,47 +297,59 @@ class AINameService:
                 )
                 result.failed_cells.append(cell_ref)
         
-        # Update statistics
-        successful = len([r for r in result.results.values() if r.status == "success"])
-        result.processing_stats = {
-            "total_cells": len(cell_references),
-            "successful": successful,
-            "failed": len(cell_references) - successful
-        }
-        
         return result
     
-    def _create_batch_prompt(self, sheet_name: str, cell_references: List[str], 
-                           structured_data: Dict = None) -> str:
-        """Create prompt for batch cell naming"""
+    def _create_sheet_specific_prompt(self, sheet_name: str, cell_references: List[str]) -> str:
+        """Create sheet-specific prompt focused on relevant line numbers"""
         
-        cell_list = ", ".join(cell_references)
+        # Extract row numbers for cells that belong to THIS sheet only
+        sheet_rows = []
+        for cell_ref in cell_references:
+            try:
+                if '!' in cell_ref:
+                    ref_sheet, cell_addr = cell_ref.split('!', 1)
+                    # Only process cells that belong to this sheet
+                    if ref_sheet == sheet_name:
+                        import re
+                        match = re.match(r'^[A-Z]+(\d+)$', cell_addr.upper())
+                        if match:
+                            row_num = int(match.group(1))
+                            sheet_rows.append((cell_ref, row_num))
+            except Exception as e:
+                logger.error(f"Error parsing cell reference {cell_ref}: {e}")
+                continue
+
+        # Create line-specific instructions for this sheet
+        line_instructions = []
+        for cell_ref, row_num in sheet_rows:
+            line_instructions.append(f'- {cell_ref} (row {row_num})')
         
-        prompt = f"""You are analyzing a financial Excel model. The screenshot shows a section of the '{sheet_name}' worksheet.
+        line_list = '\n'.join(line_instructions) if line_instructions else "- No valid cells found for this sheet"
+        
+        prompt = f"""You are analyzing the '{sheet_name}' worksheet of a financial Excel model. 
+The screenshot shows columns A-E of this sheet.
 
-Target cells to name (highlighted in red): {cell_list}
+Your task is to create descriptive names for the following cells by analyzing their row context in the screenshot:
 
-Please generate concise, descriptive business names for each highlighted cell that capture their meaning and context. 
+{line_list}
 
 Requirements:
-- Maximum 50 characters per name
-- Include time periods if apparent (FY-2021, Q1-2023, Dec-21, etc.)
-- Include business context (Revenue, EBITDA, Operating Income, etc.)
-- Be specific enough to distinguish similar items
-- Follow financial modeling conventions
-- Use the visual context and surrounding labels to understand meaning
+- Maximum 50 characters per name.
+- Include business context (e.g., Revenue, EBITDA, Operating Income).
+- Be specific about the line item type.
+- Follow financial modeling conventions.
+- Do NOT include years, quarters, or time periods in names.
+- Focus only on describing WHAT the line item represents, not WHEN.
+- Note: Only columns A-E are visible - year information will be added separately.
 
-Return your response as a JSON object with this exact format:
+Return your response as a JSON object with a single key, "cell_names", where the value is another object mapping cell references to their suggested name and confidence score.
+For example:
 {{
   "cell_names": {{
-    "{cell_references[0] if cell_references else 'Sheet!A1'}": {{"name": "Descriptive Name Here", "confidence": 0.95}},
-    "{cell_references[1] if len(cell_references) > 1 else 'Sheet!B1'}": {{"name": "Another Name Here", "confidence": 0.87}}
+    "Sheet1!A1": {{'name': "Descriptive Name", 'confidence': 0.95}}
   }}
 }}
-
-Only include cells that you can confidently name based on the visual context. If you cannot determine a meaningful name for a cell, omit it from the response.
 """
-        
         return prompt
     
     def _parse_gemini_response(self, response_text: str, cell_references: List[str]) -> Dict[str, AINameResult]:

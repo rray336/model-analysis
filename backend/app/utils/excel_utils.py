@@ -35,12 +35,15 @@ class ExcelReader:
         """Get all sheet names in the workbook"""
         if not self.workbook:
             self.load_workbook()
-        return self.workbook.sheetnames
+        return self.workbook.sheetnames if self.workbook else []
     
     def analyze_sheet_content(self, sheet_name: str, max_rows: int = 50, max_cols: int = 20) -> Dict[str, Any]:
         """Analyze the content of a specific sheet"""
         if not self.workbook:
             self.load_workbook()
+        
+        if not self.workbook:
+            return {}
             
         sheet = self.workbook[sheet_name]
         
@@ -93,18 +96,27 @@ class ExcelReader:
 
 def get_cell_value_and_formula(workbook_path: Path, sheet_name: str, cell_address: str) -> Tuple[Optional[float], Optional[str]]:
     """Get both the calculated value and formula for a specific cell"""
+    wb_formula = None
+    wb_data = None
     try:
         # Load workbook with data_only=False to get formulas
         wb_formula = openpyxl.load_workbook(workbook_path, data_only=False)
         # Load workbook with data_only=True to get calculated values
         wb_data = openpyxl.load_workbook(workbook_path, data_only=True)
         
-        if sheet_name not in wb_formula.sheetnames:
+        # Find the correct sheet name with case-insensitivity
+        actual_sheet_name = None
+        for s in wb_formula.sheetnames:
+            if s.strip().lower() == sheet_name.strip().lower():
+                actual_sheet_name = s
+                break
+        
+        if not actual_sheet_name:
             logger.warning(f"Sheet '{sheet_name}' not found in workbook")
             return None, None
         
-        sheet_formula = wb_formula[sheet_name]
-        sheet_data = wb_data[sheet_name]
+        sheet_formula = wb_formula[actual_sheet_name]
+        sheet_data = wb_data[actual_sheet_name]
         
         # Get the cell
         cell_formula = sheet_formula[cell_address]
@@ -120,14 +132,23 @@ def get_cell_value_and_formula(workbook_path: Path, sheet_name: str, cell_addres
         if cell_formula.data_type == 'f' and cell_formula.value:
             formula = str(cell_formula.value)
         
-        wb_formula.close()
-        wb_data.close()
-        
         return value, formula
         
     except Exception as e:
         logger.error(f"Error getting cell {sheet_name}!{cell_address}: {e}")
         return None, None
+    finally:
+        # Ensure workbooks are always closed
+        if wb_formula:
+            try:
+                wb_formula.close()
+            except Exception:
+                pass
+        if wb_data:
+            try:
+                wb_data.close()
+            except Exception:
+                pass
 
 def validate_cell_address(cell_address: str) -> bool:
     """Validate that a cell address is in the correct format (e.g., A1, B5, AC123)"""
@@ -176,6 +197,7 @@ def detect_financial_keywords(text: str) -> Dict[str, int]:
 
 def get_row_values(workbook_path: Path, sheet_name: str, row_number: int, max_columns: int = 6) -> List[Dict[str, Any]]:
     """Get values from a specific row for column selection dropdown"""
+    wb = None
     try:
         wb = openpyxl.load_workbook(workbook_path, data_only=True)
         
@@ -206,15 +228,21 @@ def get_row_values(workbook_path: Path, sheet_name: str, row_number: int, max_co
                 "is_meaningful": len(display_value.strip()) > 0 and not display_value.isdigit()
             })
         
-        wb.close()
         return row_values
         
     except Exception as e:
         logger.error(f"Error getting row values for {sheet_name}!{row_number}: {e}")
         return []
+    finally:
+        if wb:
+            try:
+                wb.close()
+            except Exception:
+                pass
 
 def get_cell_name_from_column(workbook_path: Path, sheet_name: str, row_number: int, column_letter: str) -> Optional[str]:
     """Get the name value from a specific column of a row"""
+    wb = None
     try:
         wb = openpyxl.load_workbook(workbook_path, data_only=True)
         
@@ -233,12 +261,17 @@ def get_cell_name_from_column(workbook_path: Path, sheet_name: str, row_number: 
             else:
                 return str(cell.value).strip()
         
-        wb.close()
         return None
         
     except Exception as e:
         logger.error(f"Error getting cell name from {sheet_name}!{column_letter}{row_number}: {e}")
         return None
+    finally:
+        if wb:
+            try:
+                wb.close()
+            except Exception:
+                pass
 
 def analyze_cell_relationships(sheet) -> Dict[str, List[str]]:
     """

@@ -89,9 +89,116 @@ ai_processed_cells: dict = {}
 manual_ai_edits: dict = {}
 
 
+def cleanup_uploads_directory():
+    """Clean up all files and folders in the uploads directory with improved Windows compatibility"""
+    try:
+        if not UPLOADS_DIR.exists():
+            return
+            
+        import gc
+        import time
+        import os
+        
+        # Force close any open workbooks and clear sessions
+        force_close_open_workbooks()
+        
+        # Multiple garbage collection passes to release file handles
+        for _ in range(3):
+            gc.collect()
+        time.sleep(1)  # Give Windows more time to release handles
+        
+        deleted_count = 0
+        failed_count = 0
+        old_files_count = 0
+        
+        # Get current time for age-based cleanup
+        current_time = time.time()
+        max_age_hours = 24  # Only try to delete files older than 24 hours
+        
+        for item in UPLOADS_DIR.iterdir():
+            try:
+                # Check file age - only delete old uploads to avoid conflicts
+                try:
+                    item_age_hours = (current_time - item.stat().st_mtime) / 3600
+                    if item_age_hours < max_age_hours:
+                        continue  # Skip recent files that might be in use
+                    old_files_count += 1
+                except OSError:
+                    # If we can't get file stats, assume it's old
+                    old_files_count += 1
+                
+                if item.is_dir():
+                    # Try to delete directory with retries
+                    for attempt in range(2):
+                        try:
+                            shutil.rmtree(item)
+                            deleted_count += 1
+                            logger.debug(f"Deleted old upload directory: {item.name}")
+                            break
+                        except (OSError, PermissionError) as e:
+                            if attempt == 0:
+                                time.sleep(0.5)
+                                gc.collect()
+                            else:
+                                # Silently fail for locked directories - this is expected
+                                failed_count += 1
+                                break
+                else:
+                    try:
+                        item.unlink()
+                        deleted_count += 1
+                        logger.debug(f"Deleted old upload file: {item.name}")
+                    except (OSError, PermissionError):
+                        failed_count += 1
+                        
+            except Exception as e:
+                logger.debug(f"Error processing {item}: {e}")
+                failed_count += 1
+        
+        # Only log if there's something interesting to report
+        if deleted_count > 0:
+            logger.info(f"Cleanup: {deleted_count} old uploads deleted, {failed_count} locked items skipped")
+        elif old_files_count > 0 and failed_count > 0:
+            logger.debug(f"Cleanup: {failed_count} old upload directories are locked (will retry on next upload)")
+        # If no old files and no deletions, don't log anything
+                
+    except Exception as e:
+        logger.debug(f"Error during uploads cleanup: {e}")  # Reduced to debug level
+        # Don't raise exception - upload can still proceed
+
+
+
+
+def force_close_open_workbooks():
+    """Force close any open workbooks by clearing sessions"""
+    try:
+        # Clear all session references to workbooks
+        for session_id in list(sessions.keys()):
+            try:
+                session_data = sessions[session_id]
+                # If session has any workbook references, clear them
+                if 'workbook' in session_data:
+                    del session_data['workbook']
+                if 'excel_reader' in session_data:
+                    del session_data['excel_reader']
+            except Exception as e:
+                logger.debug(f"Error clearing session {session_id}: {e}")
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
+        
+    except Exception as e:
+        logger.debug(f"Error in force_close_open_workbooks: {e}")
+
+
+
 @app.post("/api/upload", response_model=UploadResponse)
 async def upload_excel_file(file: UploadFile = File(...)):
     """Upload a single Excel file and return session information"""
+    
+    # Clean up uploads directory before processing new file
+    cleanup_uploads_directory()
     
     # Validate file type
     if not file.filename or not file.filename.lower().endswith(('.xlsx', '.xls')):
@@ -290,7 +397,7 @@ async def drill_down_cell(
                 value=dep.value,
                 formula=dep.formula,
                 is_leaf=dep.is_leaf_node,
-                can_expand=not dep.is_leaf_node and len(dep.dependencies) == 0,  # Has formula but not yet expanded
+                can_expand=dep.formula is not None and len(dep.dependencies) == 0,  # Has formula but not yet expanded
                 depth=depth,
                 children=[],
                 expanded=False,
@@ -340,10 +447,12 @@ async def expand_dependency(
         raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name}' not found")
     
     try:
+        logger.info(f"Expanding dependency: {sheet_name}!{cell_address}")
         # Get dependencies for this specific cell
         dependencies = formula_analyzer.get_progressive_dependencies(
             file_path, sheet_name, cell_address.upper(), depth=1
         )
+        logger.info(f"Found {len(dependencies) if dependencies else 0} dependencies for {sheet_name}!{cell_address}")
         
         if not dependencies:
             dependencies = []
@@ -404,7 +513,7 @@ async def expand_dependency(
                 value=dep.value,
                 formula=dep.formula,
                 is_leaf=dep.is_leaf_node,
-                can_expand=not dep.is_leaf_node,
+                can_expand=dep.formula is not None,
                 depth=1,
                 children=[],
                 expanded=False,
@@ -486,9 +595,69 @@ async def get_naming_config(session_id: str):
     config = naming_configs.get(session_id, {})
     return {"naming_config": config}
 
+@app.post("/api/get-resolved-names/{session_id}")
+async def get_resolved_names(session_id: str, request_body: dict):
+    """Get resolved names for a batch of cell references"""
+    
+    cell_references = request_body.get("cell_references", [])
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session_data = sessions[session_id]
+    
+    try:
+        results = {}
+        
+        for cell_ref in cell_references:
+            resolved_name = None
+            name_source = None
+            row_values_data = None
+            
+            # Check if this dependency has a configured naming column
+            if session_id in naming_configs and '!' in cell_ref:
+                dep_sheet, dep_cell = cell_ref.split('!', 1)
+                try:
+                    _, row_num = parse_cell_address(dep_cell)
+                    if dep_sheet in naming_configs[session_id]:
+                        column_letter = naming_configs[session_id][dep_sheet]
+                        resolved_name = get_cell_name_from_column(session_data["file_path"], dep_sheet, row_num, column_letter)
+                        if resolved_name:
+                            name_source = f"Column {column_letter}"
+                except:
+                    pass
+            
+            # If no resolved name, get row values for dropdown
+            if not resolved_name and '!' in cell_ref:
+                dep_sheet, dep_cell = cell_ref.split('!', 1)
+                try:
+                    _, row_num = parse_cell_address(dep_cell)
+                    row_values = get_row_values(session_data["file_path"], dep_sheet, row_num)
+                    row_values_data = [RowValue(**rv) for rv in row_values]
+                except:
+                    pass
+            
+            results[cell_ref] = {
+                "resolved_name": resolved_name,
+                "name_source": name_source,
+                "row_values": row_values_data
+            }
+        
+        return {"results": results}
+        
+    except Exception as e:
+        logger.error(f"Error getting resolved names: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting resolved names: {str(e)}")
+
 @app.post("/api/generate-ai-names/{session_id}/{sheet_name}")
 async def generate_ai_names(session_id: str, sheet_name: str, request: AIBatchRequest):
     """Generate AI names for a batch of cells in a sheet"""
+    
+    # URL decode sheet name to handle spaces and special characters
+    import urllib.parse
+    decoded_sheet_name = urllib.parse.unquote(sheet_name)
+    logger.info(f"AI Names request: original='{sheet_name}', decoded='{decoded_sheet_name}'")
     
     # Validate session
     if session_id not in sessions:
@@ -497,9 +666,17 @@ async def generate_ai_names(session_id: str, sheet_name: str, request: AIBatchRe
     session_data = sessions[session_id]
     file_path = session_data["file_path"]
     
-    # Validate sheet name
-    if sheet_name not in session_data["sheets"]:
-        raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name}' not found")
+    # Validate sheet name (try both original and decoded)
+    final_sheet_name = None
+    if decoded_sheet_name in session_data["sheets"]:
+        final_sheet_name = decoded_sheet_name
+    elif sheet_name in session_data["sheets"]:
+        final_sheet_name = sheet_name
+    else:
+        available_sheets = ", ".join(session_data["sheets"])
+        raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name}' (decoded: '{decoded_sheet_name}') not found. Available: {available_sheets}")
+    
+    logger.info(f"Using sheet name: '{final_sheet_name}'")
     
     try:
         # Filter out already processed cells
@@ -515,30 +692,52 @@ async def generate_ai_names(session_id: str, sheet_name: str, request: AIBatchRe
         if not unprocessed_cells:
             return {"message": "All cells already processed", "results": {}, "failed_cells": [], "processing_stats": {"total_cells": 0, "successful": 0, "failed": 0}}
         
-        # Call AI service
+        # Call AI service with corrected sheet name
         batch_result = await ai_naming_service.generate_batch_names(
-            file_path, sheet_name, unprocessed_cells
+            file_path, final_sheet_name, unprocessed_cells
         )
         
-        # Store results in session
+        # Store results in session (now handling multi-sheet results)
         if session_id not in ai_processed_cells:
             ai_processed_cells[session_id] = {}
-        if sheet_name not in ai_processed_cells[session_id]:
-            ai_processed_cells[session_id][sheet_name] = {}
         
         # Convert AINameResult objects to dict for storage
+        sheets_processed = set()
         for cell_ref, ai_result in batch_result.results.items():
-            ai_processed_cells[session_id][sheet_name][cell_ref] = {
-                "suggested_name": ai_result.suggested_name,
-                "confidence": ai_result.confidence,
-                "status": ai_result.status,
-                "error_message": ai_result.error_message
-            }
+            # Extract sheet name from cell reference
+            if '!' in cell_ref:
+                result_sheet_name, _ = cell_ref.split('!', 1)
+                sheets_processed.add(result_sheet_name)
+                
+                # Initialize sheet storage if needed
+                if result_sheet_name not in ai_processed_cells[session_id]:
+                    ai_processed_cells[session_id][result_sheet_name] = {}
+                
+                # Store result in correct sheet
+                ai_processed_cells[session_id][result_sheet_name][cell_ref] = {
+                    "suggested_name": ai_result.suggested_name,
+                    "confidence": ai_result.confidence,
+                    "status": ai_result.status,
+                    "error_message": ai_result.error_message
+                }
+            else:
+                # Fallback for cells without sheet prefix (shouldn't happen)
+                if final_sheet_name not in ai_processed_cells[session_id]:
+                    ai_processed_cells[session_id][final_sheet_name] = {}
+                ai_processed_cells[session_id][final_sheet_name][cell_ref] = {
+                    "suggested_name": ai_result.suggested_name,
+                    "confidence": ai_result.confidence,
+                    "status": ai_result.status,
+                    "error_message": ai_result.error_message
+                }
         
-        logger.info(f"Generated AI names for {len(unprocessed_cells)} cells in {sheet_name}")
+        # Enhanced logging with sheet breakdown
+        sheets_list = list(sheets_processed) if sheets_processed else [final_sheet_name]
+        logger.info(f"Generated AI names for {len(unprocessed_cells)} cells across {len(sheets_list)} sheets: {', '.join(sheets_list)}")
         
         return {
-            "message": f"Generated AI names for {len(unprocessed_cells)} cells",
+            "message": f"Generated AI names for {len(unprocessed_cells)} cells across {len(sheets_list)} sheets",
+            "sheets_processed": sheets_list,
             "results": {cell_ref: {
                 "cell_reference": result.cell_reference,
                 "suggested_name": result.suggested_name,
@@ -600,10 +799,86 @@ async def mark_manual_edit(session_id: str, sheet_name: str, cell_address: str, 
         "manual_name": manual_name
     }
 
+@app.get("/api/debug-screenshot/{session_id}/{sheet_name}")
+async def debug_screenshot(session_id: str, sheet_name: str, cell_refs: str = ""):
+    """Debug endpoint to generate and save screenshot for testing"""
+    
+    # URL decode sheet name to handle spaces and special characters
+    import urllib.parse
+    decoded_sheet_name = urllib.parse.unquote(sheet_name)
+    logger.info(f"Debug screenshot request: original='{sheet_name}', decoded='{decoded_sheet_name}'")
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session_data = sessions[session_id]
+    file_path = session_data["file_path"]
+    
+    # Validate sheet name (try both original and decoded)
+    final_sheet_name = None
+    if decoded_sheet_name in session_data["sheets"]:
+        final_sheet_name = decoded_sheet_name
+    elif sheet_name in session_data["sheets"]:
+        final_sheet_name = sheet_name
+    else:
+        available_sheets = ", ".join(session_data["sheets"])
+        raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name}' (decoded: '{decoded_sheet_name}') not found. Available: {available_sheets}")
+    
+    logger.info(f"Debug screenshot using sheet name: '{final_sheet_name}'")
+    
+    try:
+        from backend.app.services.ai_naming_service import AIExcelScreenshotGenerator
+        import base64
+        
+        # Parse cell references (comma-separated)
+        cell_references = [ref.strip() for ref in cell_refs.split(",") if ref.strip()] if cell_refs else ["A1"]
+        
+        # Generate screenshot
+        screenshot_gen = AIExcelScreenshotGenerator(file_path)
+        screenshot_bytes = screenshot_gen.generate_context_screenshot(final_sheet_name, cell_references)
+        
+        # Save to debug folder
+        debug_dir = Path("debug_screenshots")
+        debug_dir.mkdir(exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        screenshot_path = debug_dir / f"debug_{final_sheet_name.replace(' ', '_')}_{timestamp}.png"
+        
+        with open(screenshot_path, "wb") as f:
+            f.write(screenshot_bytes)
+        
+        # Return base64 for display and file path
+        screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
+        
+        return {
+            "message": f"Screenshot generated successfully",
+            "file_path": str(screenshot_path),
+            "sheet_name": final_sheet_name,
+            "original_sheet_name": sheet_name,
+            "target_cells": cell_references,
+            "screenshot_base64": screenshot_base64,
+            "size_bytes": len(screenshot_bytes)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating debug screenshot: {e}")
+        raise HTTPException(status_code=500, detail=f"Error generating screenshot: {str(e)}")
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "Model Analysis"}
+
+@app.post("/api/force-cleanup")
+async def force_cleanup():
+    """Force cleanup of uploads directory (manual trigger)"""
+    try:
+        cleanup_uploads_directory()
+        return {"message": "Cleanup completed", "status": "success"}
+    except Exception as e:
+        logger.error(f"Error in force cleanup: {e}")
+        return {"message": f"Cleanup failed: {str(e)}", "status": "error"}
 
 @app.delete("/api/sessions/{session_id}")
 async def cleanup_session(session_id: str):
@@ -668,8 +943,57 @@ async def serve_frontend(path: str):
     else:
         return {"message": "Frontend not built", "path": path}
 
+# Application shutdown cleanup using atexit for compatibility
+import atexit
+
+def cleanup_on_exit():
+    """Clean up resources when the application shuts down"""
+    logger.info("Application shutting down - cleaning up resources")
+    
+    try:
+        # Force close all open workbooks
+        force_close_open_workbooks()
+        
+        # Clean up all sessions
+        session_ids = list(sessions.keys())
+        for session_id in session_ids:
+            try:
+                session_dir = UPLOADS_DIR / session_id
+                if session_dir.exists():
+                    shutil.rmtree(session_dir, ignore_errors=True)
+            except Exception as e:
+                logger.debug(f"Error cleaning session {session_id} on shutdown: {e}")
+        
+        # Clear all in-memory data
+        sessions.clear()
+        naming_configs.clear()
+        ai_processed_cells.clear()
+        manual_ai_edits.clear()
+        
+        logger.info("Application cleanup completed")
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}")
+
+# Register cleanup function
+atexit.register(cleanup_on_exit)
+
+
 if __name__ == "__main__":
     import uvicorn
+    import signal
+    import sys
+    
+    def signal_handler(sig, frame):
+        """Handle shutdown signals gracefully"""
+        logger.info(f"Received signal {sig}, shutting down gracefully...")
+        # Force cleanup before exit
+        force_close_open_workbooks()
+        sys.exit(0)
+    
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     uvicorn.run(
         "main:app", 
         host="0.0.0.0", 

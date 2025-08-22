@@ -26,6 +26,8 @@ All core features have been implemented and tested. The application is ready for
 - **🤖 AI-Powered Contextual Naming**: Advanced AI naming using Google Gemini
   - **New "AI Name" column** with intelligent contextual analysis
   - **Screenshot-based context**: AI analyzes visual Excel layout for better understanding
+  - **Improved prompting**: Enhanced AI prompts that focus on business line items without time periods
+  - **Clean naming**: Generates base names like "Revenue" instead of "Revenue 2024" for consistency
   - **Batch processing**: Generate names for all visible cells with one click
   - **Incremental updates**: Only processes new/unprocessed cells on repeated clicks
   - **Manual editing**: Click any AI name to edit with red text indicating user changes
@@ -204,6 +206,22 @@ model-analysis/
 - **Backend**: FastAPI, Python, openpyxl
 - **Frontend**: React 18, TypeScript, Vite, Tailwind CSS
 - **Architecture**: Combined serving (FastAPI serves both API and frontend)
+
+## ⚡ Recent Improvements
+
+### File Cleanup & Memory Management
+- **Windows-Compatible Cleanup**: Enhanced upload directory cleanup with proper file handle management
+- **Age-Based Deletion**: Only attempts to delete files older than 24 hours to avoid conflicts
+- **Improved Error Handling**: Reduced warning spam and better handling of locked files
+- **Automatic Cleanup**: Proper workbook closure using `finally` blocks in all Excel operations
+- **Session Management**: Force close open workbooks on application shutdown
+- **Manual Cleanup**: Added `/api/force-cleanup` endpoint for manual cleanup when needed
+
+### AI Naming Enhancements
+- **Improved Prompts**: Enhanced AI instructions to generate clean line item names without years
+- **Contextual Focus**: AI now focuses on "WHAT" the line item is, not "WHEN" it applies
+- **Consistent Naming**: Generates base names like "Revenue" instead of "Revenue 2024"
+- **Better Instructions**: Clear guidelines prevent time period assumptions from limited column view
 
 ## Troubleshooting
 
