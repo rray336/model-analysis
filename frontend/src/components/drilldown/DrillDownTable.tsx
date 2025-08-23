@@ -71,6 +71,8 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
   const [editValue, setEditValue] = useState<string>('');
   const [nameDisplayMode, setNameDisplayMode] = useState<'manual' | 'ai'>('manual');
   const [showManualComponents, setShowManualComponents] = useState(true);
+  const [sourceCellName, setSourceCellName] = useState<string>('Source Cell');
+  const [sourceCellManuallyEdited, setSourceCellManuallyEdited] = useState<boolean>(false);
 
   const loadNamingConfig = useCallback(async () => {
     try {
@@ -388,33 +390,40 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
     try {
       await ApiService.markManualEdit(sessionId, cellInfo.sheet_name, cellRef, editValue.trim());
       
-      // Update local state to show manual edit immediately
-      setDependencies(prev => {
-        const updateDependency = (deps: NestedDependencyInfo[]): NestedDependencyInfo[] => {
-          return deps.map(dep => {
-            if (dep.cell_reference === cellRef) {
-              return {
-                ...dep,
-                ai_name: editValue.trim(),
-                is_manually_edited: true,
-                ai_status: 'success' as const
-              };
-            }
-            if (dep.children.length > 0) {
-              return { ...dep, children: updateDependency(dep.children) };
-            }
-            return dep;
-          });
-        };
-        return updateDependency(prev);
-      });
+      // Check if this is the source cell
+      if (drillDownData && cellRef === drillDownData.source_cell) {
+        // Update source cell name state
+        setSourceCellName(editValue.trim());
+        setSourceCellManuallyEdited(true);
+      } else {
+        // Update local state to show manual edit immediately for dependency cells
+        setDependencies(prev => {
+          const updateDependency = (deps: NestedDependencyInfo[]): NestedDependencyInfo[] => {
+            return deps.map(dep => {
+              if (dep.cell_reference === cellRef) {
+                return {
+                  ...dep,
+                  ai_name: editValue.trim(),
+                  is_manually_edited: true,
+                  ai_status: 'success' as const
+                };
+              }
+              if (dep.children.length > 0) {
+                return { ...dep, children: updateDependency(dep.children) };
+              }
+              return dep;
+            });
+          };
+          return updateDependency(prev);
+        });
+      }
 
       setEditingCell(null);
       setEditValue('');
     } catch (error: any) {
       setAiError(error.response?.data?.message || 'Failed to save manual edit');
     }
-  }, [sessionId, cellInfo.sheet_name, editValue]);
+  }, [sessionId, cellInfo.sheet_name, editValue, drillDownData]);
 
   const handleCancelEdit = useCallback(() => {
     setEditingCell(null);
@@ -781,12 +790,56 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
         </td>
         <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200">
           {(() => {
-            // Manual naming would go here if source cell gets naming features
-            return <span className="text-gray-500 italic">Source Cell</span>;
+            // Handle editing state for source cell
+            if (editingCell === drillDownData.source_cell) {
+              return (
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="text"
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleSaveEdit(drillDownData.source_cell);
+                      } else if (e.key === 'Escape') {
+                        handleCancelEdit();
+                      }
+                    }}
+                    className="flex-1 px-2 py-1 text-sm border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => handleSaveEdit(drillDownData.source_cell)}
+                    className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    onClick={handleCancelEdit}
+                    className="px-2 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700"
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            }
+            
+            // Display source cell name with editing capability
+            return (
+              <div 
+                className="cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
+                onClick={() => handleStartEdit(drillDownData.source_cell, sourceCellName)}
+                title="Click to edit source cell name"
+              >
+                <span className={sourceCellManuallyEdited ? 'text-blue-600 font-medium' : 'text-gray-500'}>
+                  {sourceCellName}
+                </span>
+              </div>
+            );
           })()}
         </td>
-        <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200">
-          <span className="font-mono text-blue-800 font-semibold">
+        <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200 text-right font-mono">
+          <span className="text-blue-800 font-semibold">
             {drillDownData.source_value.toLocaleString()}
           </span>
         </td>
@@ -810,6 +863,9 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
     if (cellInfo.can_drill_down) {
       loadInitialDrillDown();
     }
+    // Reset source cell name when cell changes
+    setSourceCellName('Source Cell');
+    setSourceCellManuallyEdited(false);
   }, [cellInfo, loadInitialDrillDown, loadNamingConfig]);
 
   if (!cellInfo.can_drill_down) {
