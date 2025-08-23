@@ -767,6 +767,43 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
     return rows;
   };
 
+  const renderSourceCellRow = (): React.ReactElement => {
+    if (!drillDownData) return <></>;
+
+    return (
+      <tr className="bg-blue-50 border-2 border-blue-200 font-medium">
+        <td className="px-4 py-3 text-sm border-b border-gray-200">
+          <div className="flex items-center pl-0">
+            <span className="font-mono text-sm font-semibold text-blue-800">
+              {drillDownData.source_cell} (SOURCE)
+            </span>
+          </div>
+        </td>
+        <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200">
+          {(() => {
+            // Manual naming would go here if source cell gets naming features
+            return <span className="text-gray-500 italic">Source Cell</span>;
+          })()}
+        </td>
+        <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200">
+          <span className="font-mono text-blue-800 font-semibold">
+            {drillDownData.source_value.toLocaleString()}
+          </span>
+        </td>
+        <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200">
+          <span className="font-mono text-sm break-all text-blue-700">
+            {drillDownData.source_formula || 'No formula'}
+          </span>
+        </td>
+        <td className="px-4 py-3 text-sm border-b border-gray-200">
+          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+            Source
+          </span>
+        </td>
+      </tr>
+    );
+  };
+
   // Load initial data when component mounts or cellInfo changes
   React.useEffect(() => {
     loadNamingConfig();
@@ -933,29 +970,6 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
               </div>
             ) : drillDownData ? (
               <>
-                {/* Source Cell Info */}
-                <div className="mb-6 p-4 bg-blue-50 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="font-semibold text-blue-900">Source Cell</h4>
-                      <p className="text-blue-800 font-mono">{drillDownData.source_cell}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm text-blue-600">Value</p>
-                      <p className="text-lg font-semibold text-blue-900 font-mono">
-                        {drillDownData.source_value.toLocaleString()}
-                      </p>
-                    </div>
-                  </div>
-                  {drillDownData.source_formula && (
-                    <div className="mt-2">
-                      <p className="text-sm text-blue-600">Formula</p>
-                      <p className="text-blue-900 font-mono text-sm break-all">
-                        {drillDownData.source_formula}
-                      </p>
-                    </div>
-                  )}
-                </div>
 
                 {/* Dependencies Table */}
                 {drillDownData.dependencies.length > 0 ? (
@@ -1003,6 +1017,8 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
                       </thead>
                       <tbody>
                         {dependencies.map(dep => renderDependencyRow(dep, 1)).flat()}
+                        {/* Source Cell Row */}
+                        {renderSourceCellRow()}
                       </tbody>
                     </table>
                   </div>

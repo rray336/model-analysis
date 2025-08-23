@@ -16,18 +16,24 @@ All core features have been implemented and tested. The application is ready for
   - Click on individual dependencies (like "Segments!BT57") to see their sub-dependencies
   - Unlimited depth exploration of formula relationships
   - Drivers appear above formulas (proper financial modeling flow)
+  - **Integrated source cell**: Source cell appears as the bottom row in the dependency table with special highlighting
 - **Smart Cell Naming**: Transform technical cell references into meaningful business names
-  - **New "Name" column** alongside Cell Reference for human-readable labels
-  - **Sheet-specific configuration**: Each worksheet can use different columns for names
-  - **Dropdown column selection**: Choose from row values to configure naming per sheet
+  - **Manual/AI Toggle**: Switch between manual three-component naming and AI-generated names
+  - **Three-Component Manual Naming**: Context + Row Values + Column Values with real-time preview
+    - **Context**: Free-text input for additional context
+    - **Row Values**: Dropdown selection with sheet-level configuration (like column naming)
+    - **Column Values**: Intelligent dropdown selection from meaningful row data
+    - **Collapsible UI**: Toggle to show/hide component columns for clean viewing
+  - **Sheet-level Configuration**: Row and column selections apply to entire sheets
+  - **Consistent Behavior**: Both row and column dropdowns work symmetrically regardless of selection order
   - **Auto-propagation**: Once configured, all cells from that sheet get meaningful names
   - **Progressive setup**: Only configure sheets when needed, others remain technical
-  - **Persistent configuration**: Settings maintained throughout the session
 - **🤖 AI-Powered Contextual Naming**: Advanced AI naming using Google Gemini
   - **New "AI Name" column** with intelligent contextual analysis
-  - **Screenshot-based context**: AI analyzes visual Excel layout for better understanding
-  - **Improved prompting**: Enhanced AI prompts that focus on business line items without time periods
-  - **Clean naming**: Generates base names like "Revenue" instead of "Revenue 2024" for consistency
+  - **Optimized Screenshots**: Focused column display (A-E + target columns) for better AI accuracy
+  - **Period-Aware Naming**: Enhanced prompts that extract periods and generate "[Period] [Description]" format
+  - **Anti-Hallucination**: Strict instructions to prevent AI from generating fake names
+  - **Extended Context**: AI sees full range needed for accurate analysis without overwhelming data
   - **Batch processing**: Generate names for all visible cells with one click
   - **Incremental updates**: Only processes new/unprocessed cells on repeated clicks
   - **Manual editing**: Click any AI name to edit with red text indicating user changes
