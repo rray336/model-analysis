@@ -37,7 +37,9 @@ from backend.app.models.analysis import (
     AIBatchRequest,
     AINameResult,
     ContextNameRequest,
-    RowValueNameRequest
+    RowValueNameRequest,
+    CellValuesRequest,
+    CellValuesResponse
 )
 from backend.app.services.formula_analyzer import FormulaAnalyzer
 from backend.app.services.ai_naming_service import AINameService
@@ -918,6 +920,53 @@ async def get_ai_processed_cells(session_id: str, sheet_name: str):
     
     return {"processed_cells": list(set(processed_cells))}
 
+@app.post("/api/get-cell-values/{session_id}", response_model=CellValuesResponse)
+async def get_cell_values(session_id: str, request: CellValuesRequest):
+    """Get values for specific cell references from a session"""
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session_data = sessions[session_id]
+    file_path = session_data["file_path"]
+    
+    values = {}
+    
+    try:
+        for cell_ref in request.cell_references:
+            try:
+                # Parse cell reference (e.g., "Revenue Driver!BV8")
+                if '!' in cell_ref:
+                    sheet_name, cell_address = cell_ref.split('!', 1)
+                else:
+                    # If no sheet specified, this shouldn't happen but handle gracefully
+                    values[cell_ref] = None
+                    continue
+                
+                # URL decode sheet name to handle spaces and special characters
+                import urllib.parse
+                decoded_sheet_name = urllib.parse.unquote(sheet_name)
+                
+                # Validate sheet exists
+                if decoded_sheet_name not in session_data["sheets"]:
+                    values[cell_ref] = None
+                    continue
+                
+                # Get cell value - pass file_path directly, not ExcelReader object
+                value, _ = get_cell_value_and_formula(file_path, decoded_sheet_name, cell_address)
+                values[cell_ref] = value
+                
+            except Exception as e:
+                logger.warning(f"Error getting value for {cell_ref}: {e}")
+                values[cell_ref] = None
+        
+        return CellValuesResponse(values=values)
+        
+    except Exception as e:
+        logger.error(f"Error getting cell values for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting cell values: {str(e)}")
+
 @app.post("/api/mark-manual-edit/{session_id}/{sheet_name}/{cell_address}")
 async def mark_manual_edit(session_id: str, sheet_name: str, cell_address: str, request_body: dict):
     """Mark a cell as manually edited with user-provided name"""
@@ -1010,6 +1059,20 @@ async def debug_screenshot(session_id: str, sheet_name: str, cell_refs: str = ""
     except Exception as e:
         logger.error(f"Error generating debug screenshot: {e}")
         raise HTTPException(status_code=500, detail=f"Error generating screenshot: {str(e)}")
+
+@app.get("/api/session-info/{session_id}")
+async def get_session_info(session_id: str):
+    """Get session information including filename"""
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session_data = sessions[session_id]
+    return {
+        "session_id": session_id,
+        "filename": session_data["filename"],
+        "upload_time": session_data["upload_time"],
+        "sheets": session_data["sheets"]
+    }
 
 @app.get("/api/health")
 async def health_check():

@@ -3,7 +3,7 @@
 export interface AnalyzeRow {
   cellReference: string;  // e.g., "Income statement!BV11"
   name: string;          // Display name (AI, manual, or fallback)
-  value: number;         // Numeric value
+  value: number | string; // Numeric value or "-" for missing
   formula: string;       // Formula text (empty string if no formula)
   rowType: 'formula' | 'constant'; // For color coding
 }

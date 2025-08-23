@@ -97,6 +97,15 @@ class RowValueNameRequest(BaseModel):
     selected_value: str
     selected_row: int
 
+class CellValuesRequest(BaseModel):
+    """Request for getting cell values from a session"""
+    session_id: str
+    cell_references: List[str]
+
+class CellValuesResponse(BaseModel):
+    """Response containing cell values"""
+    values: Dict[str, Optional[float]]
+
 class ErrorResponse(BaseModel):
     """Error response model"""
     error: str

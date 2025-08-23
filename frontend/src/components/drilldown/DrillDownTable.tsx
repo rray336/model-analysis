@@ -76,6 +76,10 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
   const [sourceCellName, setSourceCellName] = useState<string>('Source Cell');
   const [sourceCellManuallyEdited, setSourceCellManuallyEdited] = useState<boolean>(false);
   const [analyzeData, setAnalyzeData] = useState<AnalyzeData | null>(null);
+  const [newSessionId, setNewSessionId] = useState<string | null>(null);
+  const [newTableData, setNewTableData] = useState<AnalyzeData | null>(null);
+  const [baselineFileName, setBaselineFileName] = useState<string>('');
+  const [newFileName, setNewFileName] = useState<string>('');
 
   const loadNamingConfig = useCallback(async () => {
     try {
@@ -170,8 +174,13 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
         
         console.log(`Adding to analyze: ${dep.cell_reference} - ${displayInfo.name}`);
         
+        // Construct full cell reference with sheet name if not already included
+        const fullCellReference = dep.cell_reference.includes('!') 
+          ? dep.cell_reference 
+          : `${cellInfo.sheet_name}!${dep.cell_reference}`;
+        
         rows.push({
-          cellReference: dep.cell_reference,
+          cellReference: fullCellReference,
           name: displayInfo.name,
           value: dep.value,
           formula: dep.formula || '',
@@ -185,8 +194,13 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
     
     // Add source cell row at the end (matches table structure)
     const sourceHasFormula = drillDownData.source_formula && drillDownData.source_formula.trim();
+    // Construct full source cell reference with sheet name if not already included
+    const fullSourceCellReference = drillDownData.source_cell.includes('!') 
+      ? drillDownData.source_cell 
+      : `${cellInfo.sheet_name}!${drillDownData.source_cell}`;
+    
     rows.push({
-      cellReference: drillDownData.source_cell,
+      cellReference: fullSourceCellReference,
       name: sourceCellName,
       value: drillDownData.source_value,
       formula: drillDownData.source_formula || '',
@@ -205,6 +219,77 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
     const newAnalyzeData = extractAnalyzeData();
     setAnalyzeData(newAnalyzeData);
   }, [extractAnalyzeData]);
+
+  // Generate NEW table data based on BASELINE structure but with values from NEW session
+  const generateNewTableData = useCallback(async (baselineData: AnalyzeData): Promise<AnalyzeData | null> => {
+    if (!newSessionId || !baselineData) return null;
+    
+    try {
+      // Extract cell references from baseline data
+      const cellReferences = baselineData.rows.map(row => row.cellReference);
+      
+      // Get values from NEW session
+      const response = await ApiService.getCellValues(newSessionId, cellReferences);
+      const newValues = response.values;
+      
+      // Create NEW table data with same structure as BASELINE but different values
+      const newRows: AnalyzeRow[] = baselineData.rows.map(baselineRow => ({
+        cellReference: baselineRow.cellReference,
+        name: baselineRow.name, // Same name as BASELINE
+        value: newValues[baselineRow.cellReference] ?? '-', // NEW value or "-" if missing
+        formula: baselineRow.formula, // Same formula as BASELINE
+        rowType: baselineRow.rowType // Same type as BASELINE
+      }));
+      
+      return {
+        rows: newRows,
+        sourceCell: baselineData.sourceCell,
+        extractedAt: Date.now()
+      };
+    } catch (error) {
+      console.error('Error generating NEW table data:', error);
+      return null;
+    }
+  }, [newSessionId]);
+
+  // Update NEW table data whenever BASELINE data or newSessionId changes
+  React.useEffect(() => {
+    if (analyzeData && newSessionId) {
+      generateNewTableData(analyzeData).then(newData => {
+        setNewTableData(newData);
+      });
+    } else {
+      setNewTableData(null);
+    }
+  }, [analyzeData, newSessionId, generateNewTableData]);
+
+  // Handle NEW file upload
+  const handleFileUpload = useCallback(async (file: File) => {
+    try {
+      // Upload NEW file and get session
+      const uploadResponse = await ApiService.uploadFile(file);
+      setNewSessionId(uploadResponse.session_id);
+      setNewFileName(file.name);
+    } catch (error) {
+      console.error('Error uploading NEW file:', error);
+      // TODO: Show error to user
+    }
+  }, []);
+
+  // Load BASELINE filename on component mount
+  React.useEffect(() => {
+    const loadBaselineFileName = async () => {
+      try {
+        const sessionInfo = await ApiService.getSessionInfo(sessionId);
+        setBaselineFileName(sessionInfo.filename);
+      } catch (error) {
+        console.error('Error loading baseline filename:', error);
+        setBaselineFileName('Unknown File');
+      }
+    };
+
+    loadBaselineFileName();
+  }, [sessionId]);
 
   const handleColumnSelect = useCallback(async (cellReference: string, columnLetter: string) => {
     try {
@@ -1151,7 +1236,13 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
           </>
         ) : (
           /* Analyze Mode */
-          <AnalyzeView baselineData={analyzeData} />
+          <AnalyzeView 
+            baselineData={analyzeData} 
+            newData={newTableData}
+            onFileUpload={handleFileUpload}
+            baselineFileName={baselineFileName}
+            newFileName={newFileName}
+          />
         )}
       </div>
     </div>

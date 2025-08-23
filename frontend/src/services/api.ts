@@ -207,6 +207,19 @@ export class ApiService {
     const response = await api.get('/health');
     return response.data;
   }
+  
+  static async getCellValues(sessionId: string, cellReferences: string[]): Promise<{ values: Record<string, number | null> }> {
+    const response = await api.post(`/get-cell-values/${sessionId}`, {
+      session_id: sessionId,
+      cell_references: cellReferences
+    });
+    return response.data;
+  }
+  
+  static async getSessionInfo(sessionId: string): Promise<{ session_id: string; filename: string; upload_time: string; sheets: string[] }> {
+    const response = await api.get(`/session-info/${sessionId}`);
+    return response.data;
+  }
 }
 
 export default api;
