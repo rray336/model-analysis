@@ -48,6 +48,14 @@ const extractColumnLetter = (cellReference: string): string => {
   return match ? match[1] : 'A';
 };
 
+const extractRowNumber = (cellReference: string): number => {
+  // Handle sheet reference like "Sheet1!BT71" or just "BT71"
+  const cellPart = cellReference.includes('!') ? cellReference.split('!')[1] : cellReference;
+  // Extract just the row number (e.g., "71" from "BT71")
+  const match = cellPart.match(/^[A-Z]+(\d+)$/);
+  return match ? parseInt(match[1], 10) : 1;
+};
+
 
 export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellInfo }) => {
   const [drillDownData, setDrillDownData] = useState<DrillDownResponse | null>(null);
@@ -62,6 +70,7 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
   const [editingCell, setEditingCell] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<string>('');
   const [nameDisplayMode, setNameDisplayMode] = useState<'manual' | 'ai'>('manual');
+  const [showManualComponents, setShowManualComponents] = useState(true);
 
   const loadNamingConfig = useCallback(async () => {
     try {
@@ -603,56 +612,84 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
               );
             }
             
-            // Manual names mode - Three column layout
+            // Manual names mode - Four column layout
             if (nameDisplayMode === 'manual') {
+              // Compute concatenated name from components
+              const computeManualName = (dep: NestedDependencyInfo) => {
+                const parts = [];
+                if (dep.context_name && dep.context_name.trim()) {
+                  parts.push(dep.context_name.trim());
+                }
+                if (dep.row_value_name && dep.row_value_name.trim()) {
+                  parts.push(dep.row_value_name.trim());
+                }
+                if (dep.column_value_name && dep.column_value_name.trim()) {
+                  parts.push(dep.column_value_name.trim());
+                }
+                return parts.join(' ');
+              };
+
+              const manualName = computeManualName(dep);
+
               return (
                 <div className="flex gap-1">
-                  {/* Context Input - 1/3 width */}
-                  <div className="w-1/3">
-                    <ContextInput
-                      value={dep.context_name || ''}
-                      cellReference={dep.cell_reference}
-                      sessionId={sessionId}
-                      sheetName={cellInfo.sheet_name}
-                      onSave={handleContextSave}
-                    />
-                  </div>
+                  {showManualComponents && (
+                    <>
+                      {/* Context Input - 1/4 width */}
+                      <div className="w-1/4">
+                        <ContextInput
+                          value={dep.context_name || ''}
+                          cellReference={dep.cell_reference}
+                          sessionId={sessionId}
+                          sheetName={cellInfo.sheet_name}
+                          onSave={handleContextSave}
+                        />
+                      </div>
+                      
+                      {/* Row Values - 1/4 width */}
+                      <div className="w-1/4">
+                        {dep.row_value_name ? (
+                          <div className="w-full px-1 py-1 text-xs bg-gray-100 border rounded" title={dep.row_value_name}>
+                            <span className="block truncate text-gray-700">{dep.row_value_name}</span>
+                          </div>
+                        ) : (
+                          <RowValueDropdown
+                            sessionId={sessionId}
+                            columnLetter={extractColumnLetter(dep.cell_reference)}
+                            sheetName={cellInfo.sheet_name}
+                            selectedValue=""
+                            cellReference={dep.cell_reference}
+                            onSelect={(selectedValue, selectedRow) => handleRowValueSelect(dep.cell_reference, selectedValue, selectedRow)}
+                          />
+                        )}
+                      </div>
+                      
+                      {/* Column Values - 1/4 width */}
+                      <div className="w-1/4">
+                        {dep.column_value_name ? (
+                          <div className="w-full px-1 py-1 text-xs bg-gray-100 border rounded" title={dep.column_value_name}>
+                            <span className="block truncate text-gray-700">{dep.column_value_name}</span>
+                          </div>
+                        ) : (
+                          <ColumnSelectDropdown
+                            sessionId={sessionId}
+                            sheetName={cellInfo.sheet_name}
+                            rowNumber={extractRowNumber(dep.cell_reference)}
+                            onSelect={(columnLetter) => handleColumnSelect(dep.cell_reference, columnLetter)}
+                            cellReference={dep.cell_reference}
+                          />
+                        )}
+                      </div>
+                    </>
+                  )}
                   
-                  {/* Row Values - 1/3 width */}
-                  <div className="w-1/3">
-                    {dep.row_value_name ? (
-                      <div className="w-full px-1 py-1 text-xs bg-gray-100 border rounded" title={dep.row_value_name}>
-                        <span className="block truncate text-gray-700">{dep.row_value_name}</span>
-                      </div>
-                    ) : (
-                      <RowValueDropdown
-                        sessionId={sessionId}
-                        columnLetter={extractColumnLetter(dep.cell_reference)}
-                        sheetName={cellInfo.sheet_name}
-                        selectedValue=""
-                        cellReference={dep.cell_reference}
-                        onSelect={(selectedValue, selectedRow) => handleRowValueSelect(dep.cell_reference, selectedValue, selectedRow)}
-                      />
-                    )}
-                  </div>
-                  
-                  {/* Column Values Dropdown - 1/3 width */}
-                  <div className="w-1/3">
-                    {dep.column_value_name ? (
-                      <div className="w-full px-1 py-1 text-xs bg-gray-100 border rounded" title={dep.column_value_name}>
-                        <span className="block truncate text-gray-700">{dep.column_value_name}</span>
-                      </div>
-                    ) : dep.row_values && dep.row_values.length > 0 ? (
-                      <ColumnSelectDropdown
-                        rowValues={dep.row_values}
-                        onSelect={(columnLetter) => handleColumnSelect(dep.cell_reference, columnLetter)}
-                        cellReference={dep.cell_reference}
-                      />
-                    ) : (
-                      <div className="w-full px-1 py-1 text-xs bg-gray-50 border rounded text-gray-400">
-                        Column value...
-                      </div>
-                    )}
+                  {/* Computed Manual Name - full width when collapsed, 1/4 when expanded */}
+                  <div className={showManualComponents ? "w-1/4" : "w-full"}>
+                    <div className="w-full px-1 py-1 text-xs bg-blue-50 border rounded" title={manualName || 'No components configured'}>
+                      <span className="block truncate text-blue-700 font-medium">
+                        {manualName || ''}
+                      </span>
+                    </div>
                   </div>
                 </div>
               );
@@ -929,12 +966,25 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
                           <th className="text-left">Cell Reference</th>
                           <th className="text-left">
                             {nameDisplayMode === 'manual' ? (
-                              <div>
-                                Name (Manual)
-                                <div className="flex gap-1 text-xs text-gray-400 mt-1">
-                                  <span className="w-1/3">Context</span>
-                                  <span className="w-1/3">Row</span>
-                                  <span className="w-1/3">Column</span>
+                              <div className="flex items-center">
+                                <button 
+                                  onClick={() => setShowManualComponents(!showManualComponents)}
+                                  className="text-gray-400 hover:text-gray-600 text-sm mr-2 flex-shrink-0"
+                                  title={showManualComponents ? "Hide components" : "Show components"}
+                                >
+                                  {showManualComponents ? '⌄' : '>'}
+                                </button>
+                                <div className="flex gap-1 text-xs text-gray-400 flex-1">
+                                  {showManualComponents ? (
+                                    <>
+                                      <span className="w-1/4">Context</span>
+                                      <span className="w-1/4">Row</span>
+                                      <span className="w-1/4">Column</span>
+                                      <span className="w-1/4">Name (Manual)</span>
+                                    </>
+                                  ) : (
+                                    <span className="w-full">Name (Manual)</span>
+                                  )}
                                 </div>
                               </div>
                             ) : (

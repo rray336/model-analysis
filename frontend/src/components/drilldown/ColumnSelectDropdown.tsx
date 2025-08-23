@@ -1,19 +1,45 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
 import { RowValue } from '../../types/api';
+import { ApiService } from '../../services/api';
 
 interface ColumnSelectDropdownProps {
-  rowValues: RowValue[];
+  sessionId: string;
+  sheetName: string;
+  rowNumber: number;
   onSelect: (columnLetter: string) => void;
   cellReference: string;
 }
 
 export const ColumnSelectDropdown: React.FC<ColumnSelectDropdownProps> = ({
-  rowValues,
+  sessionId,
+  sheetName,
+  rowNumber,
   onSelect,
   cellReference
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [rowValues, setRowValues] = useState<RowValue[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchRowValues = async () => {
+      try {
+        setLoading(true);
+        const data = await ApiService.getRowValues(sessionId, sheetName, rowNumber);
+        setRowValues(data.row_values);
+      } catch (error) {
+        console.error('Error fetching row values:', error);
+        setRowValues([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (sessionId && sheetName && rowNumber) {
+      fetchRowValues();
+    }
+  }, [sessionId, sheetName, rowNumber]);
 
   const handleSelect = (columnLetter: string) => {
     onSelect(columnLetter);
@@ -29,7 +55,9 @@ export const ColumnSelectDropdown: React.FC<ColumnSelectDropdownProps> = ({
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center justify-between w-full px-3 py-1 text-sm border border-gray-300 rounded-md hover:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
       >
-        <span className="text-gray-600 text-xs">Select name column...</span>
+        <span className="text-gray-600 text-xs">
+          {loading ? 'Loading...' : 'Select name column...'}
+        </span>
         <ChevronDown className="w-4 h-4 text-gray-400" />
       </button>
 

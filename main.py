@@ -770,8 +770,9 @@ async def get_resolved_names(session_id: str, request_body: dict):
             
             resolved_name = " ".join(resolved_parts) if resolved_parts else None
             
-            # Get row values for dropdown only if no configurations exist (neither column nor row)
-            if not column_value_name and not row_value_name and '!' in cell_ref:
+            # Note: ColumnSelectDropdown now fetches its own data, so this optimization is no longer needed
+            # Keeping this for any legacy usage that might still depend on row_values
+            if False:  # Disabled - components are now self-sufficient
                 dep_sheet, dep_cell = cell_ref.split('!', 1)
                 try:
                     _, row_num = parse_cell_address(dep_cell)
