@@ -5,6 +5,8 @@ import { CellInfo, DrillDownResponse, DependencyInfo } from '../../types/api';
 import { ColumnSelectDropdown } from './ColumnSelectDropdown';
 import { RowValueDropdown } from './RowValueDropdown';
 import { ContextInput } from './ContextInput';
+import { AnalyzeView } from '../analyze/AnalyzeView';
+import { AnalyzeData, AnalyzeRow } from '../../types/analyzeData';
 
 interface DrillDownTableProps {
   sessionId: string;
@@ -62,7 +64,7 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
   const [dependencies, setDependencies] = useState<NestedDependencyInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<'table' | 'graph'>('table');
+  const [activeView, setActiveView] = useState<'label' | 'analyze'>('label');
   const [, setNamingConfig] = useState<Record<string, string>>({});
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -73,6 +75,7 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
   const [showManualComponents, setShowManualComponents] = useState(true);
   const [sourceCellName, setSourceCellName] = useState<string>('Source Cell');
   const [sourceCellManuallyEdited, setSourceCellManuallyEdited] = useState<boolean>(false);
+  const [analyzeData, setAnalyzeData] = useState<AnalyzeData | null>(null);
 
   const loadNamingConfig = useCallback(async () => {
     try {
@@ -143,6 +146,65 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
     }
     return { name: dependency.cell_reference, source: 'fallback' };
   }, [nameDisplayMode]);
+
+  // Extract data for Analyze mode with live updates - preserves EXACT table rendering order
+  const extractAnalyzeData = useCallback((): AnalyzeData | null => {
+    if (!drillDownData) return null;
+    
+    const rows: AnalyzeRow[] = [];
+    
+    // This function mirrors the EXACT same logic as the table rendering
+    const collectInRenderingOrder = (deps: NestedDependencyInfo[], depth: number = 0) => {
+      console.log(`Collecting at depth ${depth}:`, deps.map(d => `${d.cell_reference}(expanded: ${d.expanded})`));
+      
+      deps.forEach(dep => {
+        // If expanded, add its children FIRST (matches table rendering order)
+        if (dep.expanded && dep.children && dep.children.length > 0) {
+          console.log(`${dep.cell_reference} is expanded, adding ${dep.children.length} children first`);
+          collectInRenderingOrder(dep.children, depth + 1);
+        }
+        
+        // Then add the current dependency (matches table row rendering)
+        const displayInfo = getDisplayName(dep);
+        const hasFormula = dep.formula && dep.formula.trim();
+        
+        console.log(`Adding to analyze: ${dep.cell_reference} - ${displayInfo.name}`);
+        
+        rows.push({
+          cellReference: dep.cell_reference,
+          name: displayInfo.name,
+          value: dep.value,
+          formula: dep.formula || '',
+          rowType: hasFormula ? 'formula' : 'constant'
+        });
+      });
+    };
+    
+    // Collect all visible dependency rows in exact rendering order
+    collectInRenderingOrder(dependencies);
+    
+    // Add source cell row at the end (matches table structure)
+    const sourceHasFormula = drillDownData.source_formula && drillDownData.source_formula.trim();
+    rows.push({
+      cellReference: drillDownData.source_cell,
+      name: sourceCellName,
+      value: drillDownData.source_value,
+      formula: drillDownData.source_formula || '',
+      rowType: sourceHasFormula ? 'formula' : 'constant'
+    });
+    
+    return {
+      rows,
+      sourceCell: drillDownData.source_cell,
+      extractedAt: Date.now()
+    };
+  }, [dependencies, drillDownData, sourceCellName, getDisplayName]);
+
+  // Update analyze data whenever Label mode data changes
+  React.useEffect(() => {
+    const newAnalyzeData = extractAnalyzeData();
+    setAnalyzeData(newAnalyzeData);
+  }, [extractAnalyzeData]);
 
   const handleColumnSelect = useCallback(async (cellReference: string, columnLetter: string) => {
     try {
@@ -899,26 +961,26 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
           {/* View Toggle */}
           <div className="flex bg-gray-100 rounded-lg p-1">
             <button
-              onClick={() => setActiveView('table')}
+              onClick={() => setActiveView('label')}
               className={`flex items-center px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-                activeView === 'table' 
+                activeView === 'label' 
                   ? 'bg-white text-gray-900 shadow-sm' 
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
               <Calculator className="w-4 h-4 mr-1" />
-              Table
+              Label
             </button>
             <button
-              onClick={() => setActiveView('graph')}
+              onClick={() => setActiveView('analyze')}
               className={`flex items-center px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-                activeView === 'graph' 
+                activeView === 'analyze' 
                   ? 'bg-white text-gray-900 shadow-sm' 
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
               <BarChart3 className="w-4 h-4 mr-1" />
-              Graph
+              Analyze
             </button>
           </div>
         </div>
@@ -1015,7 +1077,7 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
           </div>
         )}
 
-        {activeView === 'table' ? (
+        {activeView === 'label' ? (
           <>
             {loading ? (
               <div className="text-center py-12">
@@ -1088,23 +1150,8 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
             ) : null}
           </>
         ) : (
-          /* Graph View Placeholder */
-          <div className="text-center py-16">
-            <BarChart3 className="mx-auto h-16 w-16 text-gray-400 mb-4" />
-            <h4 className="text-lg font-semibold text-gray-900 mb-2">Graph Visualization</h4>
-            <p className="text-gray-600 mb-4">
-              Visual dependency graph coming soon!
-            </p>
-            <div className="text-sm text-gray-500">
-              <p>This view will show:</p>
-              <ul className="mt-2 space-y-1">
-                <li>• Interactive node-link diagram</li>
-                <li>• Visual dependency relationships</li>
-                <li>• Zoom and pan capabilities</li>
-                <li>• Calculation path highlighting</li>
-              </ul>
-            </div>
-          </div>
+          /* Analyze Mode */
+          <AnalyzeView baselineData={analyzeData} />
         )}
       </div>
     </div>
