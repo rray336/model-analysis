@@ -220,6 +220,35 @@ export class ApiService {
     const response = await api.get(`/session-info/${sessionId}`);
     return response.data;
   }
+  
+  static async generateBaselineSummary(sessionId: string, baselineData: Array<{ cellReference: string; name: string; value: number | string; formula: string; rowType: string }>): Promise<{ summary: string; status: string; error_message?: string }> {
+    const response = await api.post(`/generate-baseline-summary/${sessionId}`, {
+      session_id: sessionId,
+      baseline_data: baselineData
+    });
+    return response.data;
+  }
+  
+  static async generateNewSummary(sessionId: string, newData: Array<{ cellReference: string; name: string; value: number | string; formula: string; rowType: string }>): Promise<{ summary: string; status: string; error_message?: string }> {
+    const response = await api.post(`/generate-new-summary/${sessionId}`, {
+      session_id: sessionId,
+      new_data: newData
+    });
+    return response.data;
+  }
+  
+  static async generateVarianceSummary(
+    baselineSessionId: string, 
+    newSessionId: string, 
+    data: { 
+      baseline_data: Array<{ cellReference: string; name: string; value: number | string; formula: string; rowType: string }>;
+      new_data: Array<{ cellReference: string; name: string; value: number | string; formula: string; rowType: string }>;
+      source_cell_name: string;
+    }
+  ): Promise<{ summary: string; status: string; error_message?: string }> {
+    const response = await api.post(`/generate-variance-summary/${baselineSessionId}/${newSessionId}`, data);
+    return response.data;
+  }
 }
 
 export default api;

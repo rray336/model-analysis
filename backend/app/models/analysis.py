@@ -106,6 +106,40 @@ class CellValuesResponse(BaseModel):
     """Response containing cell values"""
     values: Dict[str, Optional[float]]
 
+class BaselineSummaryRequest(BaseModel):
+    """Request for generating baseline AI summary"""
+    session_id: str
+    baseline_data: List[Dict[str, Any]]  # Table data for screenshot/analysis
+
+class BaselineSummaryResponse(BaseModel):
+    """Response containing baseline AI summary"""
+    summary: str
+    status: str  # "success" or "failed"
+    error_message: Optional[str] = None
+
+class NewSummaryRequest(BaseModel):
+    """Request for generating NEW AI summary"""
+    session_id: str
+    new_data: List[Dict[str, Any]]  # Table data for screenshot/analysis
+
+class NewSummaryResponse(BaseModel):
+    """Response containing NEW AI summary"""
+    summary: str
+    status: str  # "success" or "failed"
+    error_message: Optional[str] = None
+
+class VarianceSummaryRequest(BaseModel):
+    """Request for generating variance AI summary"""
+    baseline_data: List[Dict[str, Any]]  # BASELINE table data
+    new_data: List[Dict[str, Any]]       # NEW table data  
+    source_cell_name: str                # Name of the source cell for dynamic prompt
+
+class VarianceSummaryResponse(BaseModel):
+    """Response containing variance AI summary"""
+    summary: str
+    status: str  # "success" or "failed"
+    error_message: Optional[str] = None
+
 class ErrorResponse(BaseModel):
     """Error response model"""
     error: str

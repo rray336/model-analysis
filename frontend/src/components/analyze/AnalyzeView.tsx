@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Upload } from 'lucide-react';
+import { Upload, Sparkles } from 'lucide-react';
 import { AnalyzeData } from '../../types/analyzeData';
+import { ApiService } from '../../services/api';
 
 interface AnalyzeViewProps {
   baselineData: AnalyzeData | null;
@@ -8,17 +9,98 @@ interface AnalyzeViewProps {
   onFileUpload: (file: File) => void;
   baselineFileName: string;
   newFileName: string;
+  sessionId: string;
+  newSessionId: string | null;
 }
 
-export const AnalyzeView: React.FC<AnalyzeViewProps> = ({ baselineData, newData, onFileUpload, baselineFileName, newFileName }) => {
+export const AnalyzeView: React.FC<AnalyzeViewProps> = ({ baselineData, newData, onFileUpload, baselineFileName, newFileName, sessionId, newSessionId }) => {
   const [baselineAiSummary, setBaselineAiSummary] = useState<string>('');
   const [newAiSummary, setNewAiSummary] = useState<string>('');
   const [varianceSummary, setVarianceSummary] = useState<string>('');
+  const [isGeneratingBaseline, setIsGeneratingBaseline] = useState<boolean>(false);
+  const [isGeneratingNew, setIsGeneratingNew] = useState<boolean>(false);
+  const [isGeneratingVariance, setIsGeneratingVariance] = useState<boolean>(false);
   
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       onFileUpload(file);
+    }
+  };
+
+  const handleGenerateBaselineSummary = async () => {
+    if (!baselineData || isGeneratingBaseline) return;
+    
+    setIsGeneratingBaseline(true);
+    try {
+      const response = await ApiService.generateBaselineSummary(sessionId, baselineData.rows);
+      
+      if (response.status === 'success') {
+        setBaselineAiSummary(response.summary);
+      } else {
+        const errorMessage = response.error_message || 'Unknown error occurred';
+        setBaselineAiSummary(`Error generating summary: ${errorMessage}`);
+      }
+    } catch (error) {
+      console.error('Error generating baseline summary:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setBaselineAiSummary(`Error generating summary: ${errorMessage}`);
+    } finally {
+      setIsGeneratingBaseline(false);
+    }
+  };
+
+  const handleGenerateNewSummary = async () => {
+    if (!newData || !newSessionId || isGeneratingNew) return;
+    
+    setIsGeneratingNew(true);
+    try {
+      const response = await ApiService.generateNewSummary(newSessionId, newData.rows);
+      
+      if (response.status === 'success') {
+        setNewAiSummary(response.summary);
+      } else {
+        const errorMessage = response.error_message || 'Unknown error occurred';
+        setNewAiSummary(`Error generating summary: ${errorMessage}`);
+      }
+    } catch (error) {
+      console.error('Error generating NEW summary:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setNewAiSummary(`Error generating summary: ${errorMessage}`);
+    } finally {
+      setIsGeneratingNew(false);
+    }
+  };
+
+  const handleGenerateVarianceSummary = async () => {
+    if (!baselineData || !newData || !newSessionId || isGeneratingVariance) return;
+    
+    // Check if both datasets are available
+    if (!baselineData.rows.length || !newData.rows.length) {
+      setVarianceSummary('Error: Both BASELINE and NEW tables must have data for variance analysis.');
+      return;
+    }
+    
+    setIsGeneratingVariance(true);
+    try {
+      const response = await ApiService.generateVarianceSummary(sessionId, newSessionId, {
+        baseline_data: baselineData.rows,
+        new_data: newData.rows,
+        source_cell_name: baselineData.rows.find(row => row.cellReference === baselineData.sourceCell)?.name || 'Source Cell'
+      });
+      
+      if (response.status === 'success') {
+        setVarianceSummary(response.summary);
+      } else {
+        const errorMessage = response.error_message || 'Unknown error occurred';
+        setVarianceSummary(`Error generating variance analysis: ${errorMessage}`);
+      }
+    } catch (error) {
+      console.error('Error generating variance summary:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setVarianceSummary(`Error generating variance analysis: ${errorMessage}`);
+    } finally {
+      setIsGeneratingVariance(false);
     }
   };
 
@@ -108,15 +190,25 @@ export const AnalyzeView: React.FC<AnalyzeViewProps> = ({ baselineData, newData,
           
           {/* Baseline AI Summary */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              AI Summary
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-gray-700">
+                AI Summary
+              </label>
+              <button
+                onClick={handleGenerateBaselineSummary}
+                disabled={!baselineData || isGeneratingBaseline}
+                className="inline-flex items-center px-2 py-1 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Sparkles className="w-3 h-3 mr-1" />
+                {isGeneratingBaseline ? 'Generating...' : 'Generate'}
+              </button>
+            </div>
             <textarea
               value={baselineAiSummary}
-              onChange={(e) => setBaselineAiSummary(e.target.value)}
+              readOnly
               rows={4}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm"
-              placeholder="Paste AI summary of baseline data here..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-50 text-sm resize-none"
+              placeholder="Click 'Generate' to create AI summary of baseline data..."
             />
           </div>
         </div>
@@ -143,15 +235,25 @@ export const AnalyzeView: React.FC<AnalyzeViewProps> = ({ baselineData, newData,
           
           {/* New AI Summary */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              AI Summary
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-gray-700">
+                AI Summary
+              </label>
+              <button
+                onClick={handleGenerateNewSummary}
+                disabled={!newData || !newSessionId || isGeneratingNew}
+                className="inline-flex items-center px-2 py-1 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Sparkles className="w-3 h-3 mr-1" />
+                {isGeneratingNew ? 'Generating...' : 'Generate'}
+              </button>
+            </div>
             <textarea
               value={newAiSummary}
-              onChange={(e) => setNewAiSummary(e.target.value)}
+              readOnly
               rows={4}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm"
-              placeholder="Paste AI summary of new data here..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-50 text-sm resize-none"
+              placeholder="Click 'Generate' to create AI summary of NEW data..."
             />
           </div>
         </div>
@@ -160,15 +262,26 @@ export const AnalyzeView: React.FC<AnalyzeViewProps> = ({ baselineData, newData,
       {/* AI Summary of Variance */}
       <div className="border-t border-gray-200 pt-6">
         <div className="max-w-2xl mx-auto">
-          <label className="block text-lg font-semibold text-gray-900 mb-3">
-            AI Summary of Variance
-          </label>
+          <div className="flex items-center justify-between mb-3">
+            <label className="block text-lg font-semibold text-gray-900">
+              AI Summary of Variance
+            </label>
+            <button
+              onClick={handleGenerateVarianceSummary}
+              disabled={!baselineData || !newData || !newSessionId || isGeneratingVariance}
+              className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              title={!baselineData || !newData || !newSessionId ? "Please upload NEW file and ensure both tables have data" : ""}
+            >
+              <Sparkles className="w-4 h-4 mr-1" />
+              {isGeneratingVariance ? 'Analyzing...' : 'Generate'}
+            </button>
+          </div>
           <textarea
             value={varianceSummary}
-            onChange={(e) => setVarianceSummary(e.target.value)}
+            readOnly
             rows={6}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm"
-            placeholder="Paste AI variance analysis summary here..."
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm bg-gray-50 text-sm resize-none"
+            placeholder={!baselineData || !newData || !newSessionId ? "Please upload NEW file first, then click 'Generate' to create variance analysis..." : "Click 'Generate' to create AI variance analysis comparing BASELINE vs NEW..."}
           />
         </div>
       </div>

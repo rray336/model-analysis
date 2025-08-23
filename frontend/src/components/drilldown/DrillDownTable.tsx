@@ -1242,6 +1242,8 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
             onFileUpload={handleFileUpload}
             baselineFileName={baselineFileName}
             newFileName={newFileName}
+            sessionId={sessionId}
+            newSessionId={newSessionId}
           />
         )}
       </div>

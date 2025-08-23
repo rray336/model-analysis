@@ -39,7 +39,13 @@ from backend.app.models.analysis import (
     ContextNameRequest,
     RowValueNameRequest,
     CellValuesRequest,
-    CellValuesResponse
+    CellValuesResponse,
+    BaselineSummaryRequest,
+    BaselineSummaryResponse,
+    NewSummaryRequest,
+    NewSummaryResponse,
+    VarianceSummaryRequest,
+    VarianceSummaryResponse
 )
 from backend.app.services.formula_analyzer import FormulaAnalyzer
 from backend.app.services.ai_naming_service import AINameService
@@ -966,6 +972,187 @@ async def get_cell_values(session_id: str, request: CellValuesRequest):
     except Exception as e:
         logger.error(f"Error getting cell values for session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting cell values: {str(e)}")
+
+@app.post("/api/generate-baseline-summary/{session_id}", response_model=BaselineSummaryResponse)
+async def generate_baseline_summary(session_id: str, request: BaselineSummaryRequest):
+    """Generate AI summary for baseline table data"""
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session_data = sessions[session_id]
+    
+    try:
+        # Create comprehensive prompt for baseline analysis
+        prompt = """Based on the shared image, provide a comprehensive summary with three distinct sections:
+
+1. **Formula Structure Analysis**: Explain the logical flow of the nested calculations, the source of the initial data, and the methodology employed. Describe how the calculations build upon each other and any complex dependencies.
+
+2. **Key 1% Drivers**: Identify which items have the largest and smallest impact on the final result based on a 1% change in their input values. Rank the top 3-5 most sensitive variables.
+
+3. **Calculation Methodology & Risk Assessment**: Analyze the overall calculation approach, identify any potential risks or dependencies in the model structure, and comment on the robustness of the methodology.
+
+Please provide a detailed, professional analysis suitable for financial model review."""
+
+        # Convert baseline_data to list of dictionaries for AI service
+        baseline_data_dicts = []
+        for row in request.baseline_data:
+            if isinstance(row, dict):
+                baseline_data_dicts.append(row)
+            else:
+                # Handle other data types if needed
+                baseline_data_dicts.append(dict(row))
+        
+        # Generate AI summary using screenshot analysis
+        ai_result = await ai_naming_service.generate_table_summary(baseline_data_dicts, prompt)
+        
+        if ai_result.get('status') == 'success':
+            return BaselineSummaryResponse(
+                summary=ai_result['summary'],
+                status="success"
+            )
+        else:
+            error_msg = ai_result.get('error_message', 'Unknown AI service error')
+            return BaselineSummaryResponse(
+                summary=f"Error generating summary: {error_msg}",
+                status="failed",
+                error_message=error_msg
+            )
+            
+    except Exception as e:
+        logger.error(f"Error generating baseline summary for session {session_id}: {e}")
+        error_message = f"Error generating summary: {str(e)}"
+        return BaselineSummaryResponse(
+            summary=error_message,
+            status="failed",
+            error_message=str(e)
+        )
+
+@app.post("/api/generate-new-summary/{session_id}", response_model=NewSummaryResponse)
+async def generate_new_summary(session_id: str, request: NewSummaryRequest):
+    """Generate AI summary for NEW table data"""
+    
+    # Validate session
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session_data = sessions[session_id]
+    
+    try:
+        # Create comprehensive prompt for NEW data analysis
+        prompt = """Based on the shared image, provide a comprehensive summary with three distinct sections:
+
+1. **Formula Structure Analysis**: Explain the logical flow of the nested calculations, the source of the initial data, and the methodology employed. Describe how the calculations build upon each other and any complex dependencies.
+
+2. **Key 1% Drivers**: Identify which items have the largest and smallest impact on the final result based on a 1% change in their input values. Rank the top 3-5 most sensitive variables.
+
+3. **Calculation Methodology & Risk Assessment**: Analyze the overall calculation approach, identify any potential risks or dependencies in the model structure, and comment on the robustness of the methodology.
+
+Please provide a detailed, professional analysis suitable for financial model review."""
+
+        # Convert new_data to list of dictionaries for AI service
+        new_data_dicts = []
+        for row in request.new_data:
+            if isinstance(row, dict):
+                new_data_dicts.append(row)
+            else:
+                # Handle other data types if needed
+                new_data_dicts.append(dict(row))
+        
+        # Generate AI summary using screenshot analysis
+        ai_result = await ai_naming_service.generate_table_summary(new_data_dicts, prompt)
+        
+        if ai_result.get('status') == 'success':
+            return NewSummaryResponse(
+                summary=ai_result['summary'],
+                status="success"
+            )
+        else:
+            error_msg = ai_result.get('error_message', 'Unknown AI service error')
+            return NewSummaryResponse(
+                summary=f"Error generating summary: {error_msg}",
+                status="failed",
+                error_message=error_msg
+            )
+            
+    except Exception as e:
+        logger.error(f"Error generating NEW summary for session {session_id}: {e}")
+        error_message = f"Error generating summary: {str(e)}"
+        return NewSummaryResponse(
+            summary=error_message,
+            status="failed",
+            error_message=str(e)
+        )
+
+@app.post("/api/generate-variance-summary/{baseline_session_id}/{new_session_id}", response_model=VarianceSummaryResponse)
+async def generate_variance_summary(baseline_session_id: str, new_session_id: str, request: VarianceSummaryRequest):
+    """Generate AI variance summary comparing BASELINE vs NEW table data"""
+    
+    # Validate both sessions
+    if baseline_session_id not in sessions:
+        raise HTTPException(status_code=404, detail="BASELINE session not found")
+    
+    if new_session_id not in sessions:
+        raise HTTPException(status_code=404, detail="NEW session not found")
+    
+    try:
+        # Create comprehensive variance analysis prompt with dynamic source cell name
+        source_cell_name = request.source_cell_name
+        prompt = f"""Compare the BASELINE table (first image) with the NEW table (second image) and provide a comprehensive variance analysis with four distinct sections:
+
+1. **Major Changes in Key Drivers**: Compare the two tables and identify which line items experienced the most significant changes. Focus on both absolute value changes and percentage changes.
+
+2. **Variance Analysis of {source_cell_name}**: Analyze what were the biggest drivers of the change in {source_cell_name}. Identify which specific inputs or calculations contributed most to the overall variance.
+
+3. **Quantitative Impact Assessment**: For the top 3-5 most significant changes, provide:
+   - Absolute difference (NEW value - BASELINE value)
+   - Percentage change ((NEW - BASELINE) / BASELINE * 100)
+   - Rank them by impact magnitude
+
+4. **Formula and Methodology Changes**: Identify any changes in formulas, calculation methods, or dependencies between the two versions. Note if any new calculations were introduced or existing ones were modified.
+
+Please provide specific numerical analysis with exact figures from both tables, and focus on actionable insights about what drove the changes in {source_cell_name}."""
+
+        # Convert data to list of dictionaries for AI service
+        baseline_data_dicts = []
+        for row in request.baseline_data:
+            if isinstance(row, dict):
+                baseline_data_dicts.append(row)
+            else:
+                baseline_data_dicts.append(dict(row))
+        
+        new_data_dicts = []
+        for row in request.new_data:
+            if isinstance(row, dict):
+                new_data_dicts.append(row)
+            else:
+                new_data_dicts.append(dict(row))
+        
+        # Generate AI variance summary using dual screenshot analysis
+        ai_result = await ai_naming_service.generate_variance_summary(baseline_data_dicts, new_data_dicts, prompt)
+        
+        if ai_result.get('status') == 'success':
+            return VarianceSummaryResponse(
+                summary=ai_result['summary'],
+                status="success"
+            )
+        else:
+            error_msg = ai_result.get('error_message', 'Unknown AI service error')
+            return VarianceSummaryResponse(
+                summary=f"Error generating variance analysis: {error_msg}",
+                status="failed",
+                error_message=error_msg
+            )
+            
+    except Exception as e:
+        logger.error(f"Error generating variance summary for sessions {baseline_session_id}/{new_session_id}: {e}")
+        error_message = f"Error generating variance analysis: {str(e)}"
+        return VarianceSummaryResponse(
+            summary=error_message,
+            status="failed",
+            error_message=str(e)
+        )
 
 @app.post("/api/mark-manual-edit/{session_id}/{sheet_name}/{cell_address}")
 async def mark_manual_edit(session_id: str, sheet_name: str, cell_address: str, request_body: dict):

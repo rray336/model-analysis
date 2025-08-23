@@ -474,3 +474,151 @@ For example:
                 )
         
         return results
+    
+    async def generate_table_summary(self, baseline_data: List[Dict], prompt: str) -> Dict[str, Any]:
+        """Generate AI summary for table data using screenshot analysis"""
+        try:
+            if not self.model:
+                return {
+                    "status": "failed",
+                    "error_message": "Gemini API not configured. Set GEMINI_API_KEY environment variable."
+                }
+            
+            # Generate table screenshot
+            screenshot_bytes = self._generate_table_screenshot(baseline_data)
+            
+            # Create image for Gemini
+            import PIL.Image
+            image = PIL.Image.open(io.BytesIO(screenshot_bytes))
+            
+            # Send to Gemini with prompt
+            response = await self.model.generate_content_async([
+                prompt,
+                image
+            ])
+            
+            if response.text:
+                return {
+                    "status": "success",
+                    "summary": response.text.strip()
+                }
+            else:
+                return {
+                    "status": "failed",
+                    "error_message": "Gemini returned empty response"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error generating table summary: {e}")
+            return {
+                "status": "failed",
+                "error_message": str(e)
+            }
+    
+    def _generate_table_screenshot(self, baseline_data: List[Dict]) -> bytes:
+        """Generate screenshot of the baseline table with proper formula formatting"""
+        try:
+            # Create a figure for the table
+            fig, ax = plt.subplots(figsize=(14, max(6, len(baseline_data) * 0.4 + 2)))
+            ax.axis('tight')
+            ax.axis('off')
+            
+            # Prepare table data with headers
+            headers = ['CELL REFERENCE', 'NAME', 'VALUE', 'FORMULA']
+            table_data = [headers]
+            
+            # Add data rows with proper formula formatting
+            for row in baseline_data:
+                formatted_row = [
+                    str(row.get('cellReference', '')),
+                    str(row.get('name', '')),
+                    str(row.get('value', '')),
+                    f'"{str(row.get("formula", ""))}"' if row.get('formula') else '-'  # Wrap formulas in quotes
+                ]
+                table_data.append(formatted_row)
+            
+            # Create table with styling
+            table = ax.table(
+                cellText=table_data[1:],  # Data rows
+                colLabels=table_data[0],  # Headers
+                cellLoc='left',
+                loc='center',
+                colWidths=[0.25, 0.3, 0.15, 0.3]  # Adjust column widths
+            )
+            
+            # Style the table
+            table.auto_set_font_size(False)
+            table.set_fontsize(9)
+            table.scale(1.2, 1.8)
+            
+            # Header styling
+            for i in range(len(headers)):
+                cell = table[(0, i)]
+                cell.set_facecolor('#4472C4')
+                cell.set_text_props(weight='bold', color='white')
+                
+            # Row styling based on type
+            for i, row in enumerate(baseline_data, 1):
+                row_type = row.get('rowType', 'constant')
+                color = '#E7F3FF' if row_type == 'formula' else '#E8F5E8'  # Blue for formula, green for constant
+                
+                for j in range(len(headers)):
+                    cell = table[(i, j)]
+                    cell.set_facecolor(color)
+            
+            # Save to bytes
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png', bbox_inches='tight', dpi=150, facecolor='white', edgecolor='none')
+            plt.close()
+            buf.seek(0)
+            
+            return buf.getvalue()
+            
+        except Exception as e:
+            logger.error(f"Error generating table screenshot: {e}")
+            raise
+    
+    async def generate_variance_summary(self, baseline_data: List[Dict], new_data: List[Dict], prompt: str) -> Dict[str, Any]:
+        """Generate AI variance summary comparing two tables using dual screenshot analysis"""
+        try:
+            if not self.model:
+                return {
+                    "status": "failed",
+                    "error_message": "Gemini API not configured. Set GEMINI_API_KEY environment variable."
+                }
+            
+            # Generate screenshots for both tables
+            baseline_screenshot = self._generate_table_screenshot(baseline_data)
+            new_screenshot = self._generate_table_screenshot(new_data)
+            
+            # Create images for Gemini
+            import PIL.Image
+            baseline_image = PIL.Image.open(io.BytesIO(baseline_screenshot))
+            new_image = PIL.Image.open(io.BytesIO(new_screenshot))
+            
+            # Send to Gemini with both images and comparison prompt
+            response = await self.model.generate_content_async([
+                prompt,
+                "BASELINE Table:",
+                baseline_image,
+                "NEW Table:",
+                new_image
+            ])
+            
+            if response.text:
+                return {
+                    "status": "success",
+                    "summary": response.text.strip()
+                }
+            else:
+                return {
+                    "status": "failed",
+                    "error_message": "Gemini returned empty response"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error generating variance summary: {e}")
+            return {
+                "status": "failed",
+                "error_message": str(e)
+            }
