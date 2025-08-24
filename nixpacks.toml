@@ -1,0 +1,4 @@
+# nixpacks.toml
+[phases]
+# Override the auto-detected providers, running only the Python provider
+providers = ["python"]
