@@ -1,3 +1,6 @@
 # nixpacks.toml
 # Override the auto-detected providers, running only the Python provider
-providers = ["python"]
+providers = ["python", "node"]
+
+[phases.build]
+cmds = ["cd frontend && npm install && npm run build"]
