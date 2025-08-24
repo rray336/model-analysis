@@ -73,6 +73,34 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         <p className="text-gray-600 mt-2">
           Upload your Excel financial model to analyze cell formulas and dependencies
         </p>
+        
+        {/* Features Section */}
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-3 text-left max-w-2xl mx-auto">
+          <div className="flex items-start space-x-2">
+            <div className="w-2 h-2 bg-blue-600 rounded-full mt-2 flex-shrink-0"></div>
+            <div className="text-sm text-gray-700">
+              <span className="font-semibold text-blue-600">Live Analysis</span> – Inspect and interact with working models in real time
+            </div>
+          </div>
+          <div className="flex items-start space-x-2">
+            <div className="w-2 h-2 bg-blue-600 rounded-full mt-2 flex-shrink-0"></div>
+            <div className="text-sm text-gray-700">
+              <span className="font-semibold text-blue-600">Drill-Down Views</span> – Dive from high-level metrics to feature-level details
+            </div>
+          </div>
+          <div className="flex items-start space-x-2">
+            <div className="w-2 h-2 bg-blue-600 rounded-full mt-2 flex-shrink-0"></div>
+            <div className="text-sm text-gray-700">
+              <span className="font-semibold text-blue-600">Context-aware Tagging</span> – Auto-labels key items with AI for faster navigation
+            </div>
+          </div>
+          <div className="flex items-start space-x-2">
+            <div className="w-2 h-2 bg-blue-600 rounded-full mt-2 flex-shrink-0"></div>
+            <div className="text-sm text-gray-700">
+              <span className="font-semibold text-blue-600">Summaries & Variance</span> – AI-generated logic explanations plus baseline vs. new model comparisons
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Upload Area */}

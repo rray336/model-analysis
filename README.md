@@ -282,14 +282,17 @@ model-analysis/
 - Ensure file size is under 50MB
 - Try a different Excel file to isolate the issue
 
-## 🚀 Known Issues
+## 🎉 Recent Updates & Fixes
 
-### AI Names Section Visibility (Analyze Mode)
-- **Issue**: The "Generate AI Names" section remains visible in Analyze mode despite multiple hiding attempts
-- **Impact**: Minor UI inconsistency - section should be hidden when in Analyze mode
-- **Workaround**: Section functionality is not needed in Analyze mode, so can be ignored
-- **Technical Details**: State synchronization issue between tab appearance and content visibility logic
-- **Status**: Unresolved - would require deeper investigation of React state management
+### Visual Polish & User Experience
+- **Source Cell Display**: Removed redundant "(SOURCE)" text from source cell references for cleaner appearance
+- **Enhanced Upload Page**: Added highlighted feature bullets showcasing key capabilities:
+  - **Live Analysis** – Inspect and interact with working models in real time
+  - **Drill-Down Views** – Dive from high-level metrics to feature-level details  
+  - **Context-aware Tagging** – Auto-labels key items with AI for faster navigation
+  - **Summaries & Variance** – AI-generated logic explanations plus baseline vs. new model comparisons
+- **Responsive Design**: Feature bullets adapt between single-column (mobile) and two-column (desktop) layouts
+- **AI Names Section**: Fixed hiding behavior in Analyze mode - now properly hides Generate AI Names controls when in comparison view
 
 ## 🚀 Future Enhancements
 

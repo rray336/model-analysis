@@ -1,3 +1,8 @@
+# For front end changes may need to force rebuild
+cd frontend
+npm run build
+cd ../
+
 # Start application
 python main.py
 

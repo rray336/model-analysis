@@ -931,7 +931,7 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
         <td className="px-4 py-3 text-sm border-b border-gray-200">
           <div className="flex items-center pl-0">
             <span className="font-mono text-sm font-semibold text-blue-800">
-              {drillDownData.source_cell} (SOURCE)
+              {drillDownData.source_cell} 
             </span>
           </div>
         </td>
