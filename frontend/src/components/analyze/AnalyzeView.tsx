@@ -206,7 +206,7 @@ export const AnalyzeView: React.FC<AnalyzeViewProps> = ({ baselineData, newData,
             <textarea
               value={baselineAiSummary}
               readOnly
-              rows={4}
+              rows={8}
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-50 text-sm resize-none"
               placeholder="Click 'Generate' to create AI summary of baseline data..."
             />
@@ -251,7 +251,7 @@ export const AnalyzeView: React.FC<AnalyzeViewProps> = ({ baselineData, newData,
             <textarea
               value={newAiSummary}
               readOnly
-              rows={4}
+              rows={8}
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-50 text-sm resize-none"
               placeholder="Click 'Generate' to create AI summary of NEW data..."
             />
@@ -279,7 +279,7 @@ export const AnalyzeView: React.FC<AnalyzeViewProps> = ({ baselineData, newData,
           <textarea
             value={varianceSummary}
             readOnly
-            rows={6}
+            rows={12}
             className="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm bg-gray-50 text-sm resize-none"
             placeholder={!baselineData || !newData || !newSessionId ? "Please upload NEW file first, then click 'Generate' to create variance analysis..." : "Click 'Generate' to create AI variance analysis comparing BASELINE vs NEW..."}
           />

@@ -2,11 +2,11 @@
 
 A single file Excel financial model analyzer with progressive drill-down capabilities.
 
-## ✅ Status: PHASE 1 COMPLETE
+## ✅ Status: PROJECT COMPLETE
 
-**Phase 1** of the Excel model analyzer is fully implemented and operational. All core features including drill-down analysis, smart naming systems, AI integration, and source cell editing are complete and tested.
+The Excel model analyzer is fully implemented and operational with comprehensive AI analysis features. All phases including drill-down analysis, smart naming systems, AI integration, source cell editing, and AI-powered analysis summaries are complete and tested.
 
-**Ready for enhancements**: Additional analysis features can be added to Analyze mode
+**Latest additions**: AI Summary functionality with screenshot-based analysis for BASELINE, NEW, and Variance analysis modes
 
 ## Features
 
@@ -46,7 +46,16 @@ A single file Excel financial model analyzer with progressive drill-down capabil
 - **Formula Complexity**: Automatic complexity assessment (simple, moderate, complex)
 - **External Reference Detection**: Identifies and handles external file references (stops drill-down appropriately)
 - **Interactive Tabular Visualization**: Clean hierarchical view with expandable/collapsible rows
-- **Analyze Mode**: Tab interface ready for advanced analysis features
+- **🚀 Analyze Mode**: Complete side-by-side comparison view with AI-powered analysis
+  - **BASELINE vs NEW comparison**: Upload two Excel files for variance analysis
+  - **AI Summary Generation**: Screenshot-based AI analysis using Google Gemini 2.5 Flash
+    - **BASELINE AI Summary**: Comprehensive analysis of formula structure, 1% drivers, and risk assessment (150 words max)
+    - **NEW AI Summary**: Identical analysis for comparison files (150 words max)  
+    - **Variance AI Summary**: Detailed comparison analysis identifying major changes and quantitative impact (250 words max)
+  - **Professional table screenshots**: Automated table generation with formula quoting for optimal AI analysis
+  - **Increased textarea sizes**: Double-height textareas (8-12 rows) for better readability
+  - **Dynamic source cell naming**: Variance analysis uses actual source cell names instead of hardcoded values
+  - **Real-time error handling**: User-visible error messages with no silent failures
 
 ## Quick Start
 
@@ -181,9 +190,12 @@ cd frontend && npm run dev
 - `GET /api/row-values/{session_id}/{sheet_name}/{row_number}` - Get row values for column selection dropdown
 - `POST /api/configure-sheet-naming/{session_id}/{sheet_name}/{column_letter}` - Configure naming column for a worksheet
 - `GET /api/naming-config/{session_id}` - Get current naming configuration for session
-- `POST /api/generate-ai-names/{session_id}/{sheet_name}` - **NEW**: Generate AI names for batch of cells using Gemini
-- `GET /api/ai-processed-cells/{session_id}/{sheet_name}` - **NEW**: Get list of AI-processed cells for incremental updates
-- `POST /api/mark-manual-edit/{session_id}/{sheet_name}/{cell_address}` - **NEW**: Mark cell as manually edited with custom name
+- `POST /api/generate-ai-names/{session_id}/{sheet_name}` - Generate AI names for batch of cells using Gemini
+- `GET /api/ai-processed-cells/{session_id}/{sheet_name}` - Get list of AI-processed cells for incremental updates
+- `POST /api/mark-manual-edit/{session_id}/{sheet_name}/{cell_address}` - Mark cell as manually edited with custom name
+- `POST /api/generate-baseline-summary/{session_id}` - **NEW**: Generate AI summary for BASELINE table data
+- `POST /api/generate-new-summary/{session_id}` - **NEW**: Generate AI summary for NEW table data  
+- `POST /api/generate-variance-summary/{baseline_session_id}/{new_session_id}` - **NEW**: Generate AI variance analysis comparing BASELINE vs NEW
 - `DELETE /api/sessions/{session_id}` - Clean up session
 - `GET /api/health` - Health check
 
@@ -212,11 +224,12 @@ model-analysis/
 
 ## Technology Stack
 
-- **Backend**: FastAPI, Python, openpyxl
+- **Backend**: FastAPI, Python, openpyxl, Google Gemini 2.5 Flash, matplotlib
 - **Frontend**: React 18, TypeScript, Vite, Tailwind CSS
+- **AI Integration**: Google Gemini API for contextual naming and analysis summaries
 - **Architecture**: Combined serving (FastAPI serves both API and frontend)
 
-## ⚡ Phase 1 Completion - Recent Improvements
+## ⚡ Final Implementation - Complete AI Analysis Suite
 
 ### File Cleanup & Memory Management
 - **Windows-Compatible Cleanup**: Enhanced upload directory cleanup with proper file handle management
@@ -232,12 +245,22 @@ model-analysis/
 - **Consistent Naming**: Generates base names like "Revenue" instead of "Revenue 2024"
 - **Better Instructions**: Clear guidelines prevent time period assumptions from limited column view
 
-### Source Cell Improvements (Phase 1 Final)
+### Source Cell Improvements
 - **Editable Source Cell Names**: Click-to-edit functionality for source cell naming
 - **Consistent UI**: Source cell editing uses same interface as dependency cells
 - **Visual Consistency**: Blue styling for edited names, removing error-like red coloring
 - **Proper Alignment**: Decimal point alignment in value columns for professional appearance
 - **State Persistence**: Source cell names persist throughout analysis session
+
+### AI Analysis Suite (Final Implementation)
+- **Screenshot-Based Analysis**: Professional table screenshots using matplotlib for optimal AI analysis
+- **Google Gemini 2.5 Flash Integration**: Upgraded from 1.5 Flash for better multimodal performance
+- **Three Analysis Types**: BASELINE, NEW, and comprehensive Variance analysis
+- **Word Count Limits**: Concise summaries (150/250 words) to prevent information overload
+- **Dynamic Prompts**: Source cell names dynamically integrated into variance analysis prompts
+- **Professional Table Formatting**: Formula quoting and color coding for better AI comprehension
+- **Error Handling**: Real-time error display with no silent failures
+- **UI Improvements**: Double-height textareas (8-12 rows) for better content visibility
 
 ## Troubleshooting
 
@@ -259,15 +282,24 @@ model-analysis/
 - Ensure file size is under 50MB
 - Try a different Excel file to isolate the issue
 
-## 🚀 Future Upgrades
+## 🚀 Known Issues
+
+### AI Names Section Visibility (Analyze Mode)
+- **Issue**: The "Generate AI Names" section remains visible in Analyze mode despite multiple hiding attempts
+- **Impact**: Minor UI inconsistency - section should be hidden when in Analyze mode
+- **Workaround**: Section functionality is not needed in Analyze mode, so can be ignored
+- **Technical Details**: State synchronization issue between tab appearance and content visibility logic
+- **Status**: Unresolved - would require deeper investigation of React state management
+
+## 🚀 Future Enhancements
 
 Ready for implementation when needed:
 
-### Future Analysis Features
-- Advanced analytics and visualization capabilities
-- Node-link diagrams showing formula relationships
-- Zoom, pan, and highlighting capabilities
-- **Status**: UI placeholder implemented
+### Advanced Analysis Features  
+- Export drill-down results to Excel/CSV
+- Support for multiple file analysis
+- Enhanced formula complexity metrics
+- Circular reference detection
 
 ### Cloud Deployment
 - Railway deployment configuration (railway.json, Procfile)
@@ -275,11 +307,10 @@ Ready for implementation when needed:
 - Environment variable management
 - **Status**: Architecture ready
 
-### Advanced Features
-- Export drill-down results to Excel/CSV
-- Support for multiple file analysis
-- Enhanced formula complexity metrics
-- Circular reference detection
+### Visualization Enhancements
+- Node-link diagrams showing formula relationships
+- Advanced analytics and visualization capabilities
+- Zoom, pan, and highlighting capabilities
 
 ## Support
 

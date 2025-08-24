@@ -993,7 +993,7 @@ async def generate_baseline_summary(session_id: str, request: BaselineSummaryReq
 
 3. **Calculation Methodology & Risk Assessment**: Analyze the overall calculation approach, identify any potential risks or dependencies in the model structure, and comment on the robustness of the methodology.
 
-Please provide a detailed, professional analysis suitable for financial model review."""
+Please provide a detailed, professional analysis suitable for financial model review. Keep your response concise - maximum 150 words."""
 
         # Convert baseline_data to list of dictionaries for AI service
         baseline_data_dicts = []
@@ -1049,7 +1049,7 @@ async def generate_new_summary(session_id: str, request: NewSummaryRequest):
 
 3. **Calculation Methodology & Risk Assessment**: Analyze the overall calculation approach, identify any potential risks or dependencies in the model structure, and comment on the robustness of the methodology.
 
-Please provide a detailed, professional analysis suitable for financial model review."""
+Please provide a detailed, professional analysis suitable for financial model review. Keep your response concise - maximum 150 words."""
 
         # Convert new_data to list of dictionaries for AI service
         new_data_dicts = []
@@ -1112,7 +1112,7 @@ async def generate_variance_summary(baseline_session_id: str, new_session_id: st
 
 4. **Formula and Methodology Changes**: Identify any changes in formulas, calculation methods, or dependencies between the two versions. Note if any new calculations were introduced or existing ones were modified.
 
-Please provide specific numerical analysis with exact figures from both tables, and focus on actionable insights about what drove the changes in {source_cell_name}."""
+Please provide specific numerical analysis with exact figures from both tables, and focus on actionable insights about what drove the changes in {source_cell_name}. Keep your response concise - maximum 250 words."""
 
         # Convert data to list of dictionaries for AI service
         baseline_data_dicts = []

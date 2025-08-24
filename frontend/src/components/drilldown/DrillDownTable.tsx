@@ -1100,9 +1100,9 @@ export const DrillDownTable: React.FC<DrillDownTableProps> = ({ sessionId, cellI
           </div>
         )}
 
-        {/* AI Generation Button */}
+        {/* AI Generation Button - Only show in Label mode */}
         {drillDownData && drillDownData.dependencies.length > 0 && (
-          <div className="mb-6">
+          <div className={`mb-6 ${activeView === 'analyze' ? 'hidden' : ''}`}>
             <div className="flex gap-3">
               <button
                 onClick={handleAIGeneration}
