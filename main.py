@@ -1261,6 +1261,11 @@ async def get_session_info(session_id: str):
         "sheets": session_data["sheets"]
     }
 
+@app.get("/health")
+async def railway_health_check():
+    """Health check endpoint for Railway"""
+    return {"status": "healthy", "service": "Model Analysis"}
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint"""
